@@ -64,7 +64,7 @@
   .group-h .n{background:var(--line);color:var(--muted);border-radius:10px;padding:1px 8px;font-size:10.5px;}
   .tlist{display:flex;flex-direction:column;gap:7px;}
   .trow{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;
-    display:grid;grid-template-columns:42px 110px 1fr auto;gap:12px;align-items:center;cursor:pointer;
+    display:grid;grid-template-columns:42px max-content minmax(0,1fr) auto;gap:12px;align-items:center;cursor:pointer;
     transition:border-color .12s,box-shadow .12s;box-shadow:var(--shadow);}
   .trow:hover{border-color:#cdd1d8;box-shadow:0 2px 8px rgba(20,25,40,.10);}
   .score{width:38px;height:38px;border-radius:9px;display:flex;flex-direction:column;align-items:center;
