@@ -288,10 +288,12 @@ const CLIENT_PALETTE=["#f4811e","#1A5FAB","#7c3aed","#00B67E","#0891b2","#db2777
 function clientColor(name){ if(!name) return '#6b7280'; let h=0; for(let i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))>>>0; return CLIENT_PALETTE[h%CLIENT_PALETTE.length]; }
 // weight key derived from name; matches weights.json convention (hyphens dropped)
 function clientWeightKey(name){ return 'client_'+name.replace(/[^a-z0-9 ]/gi,'').trim().toLowerCase().replace(/\s+/g,'_'); }
-const STATUSES = ["open","in_progress","staged","done","deferred"];
-const STATUS_LABEL = {open:"Open",in_progress:"In progress",staged:"Staged",done:"Done",deferred:"Deferred"};
-const STATUS_COLOR = {open:"#64748b",in_progress:"#1A5FAB",staged:"#8b5cf6",done:"#00B67E",deferred:"#9ca3af"};
-const BOARD_COLS = ["open","in_progress","staged","done"];
+const STATUSES = ["open","in_progress","blocked","staged","done","deferred"];
+const STATUS_LABEL = {open:"Open",in_progress:"In progress",blocked:"Blocked",staged:"Staged",done:"Done",deferred:"Deferred"};
+const STATUS_COLOR = {open:"#64748b",in_progress:"#1A5FAB",blocked:"#d97706",staged:"#8b5cf6",done:"#00B67E",deferred:"#9ca3af"};
+const BOARD_COLS = ["open","in_progress","blocked","staged","done"];
+// "active" = anything still in flight (incl. blocked, so waiting-on-vendor tasks stay visible)
+const ACTIVE = ["open","in_progress","blocked","staged"];
 
 /* ---------- state ---------- */
 let doc = load();
@@ -372,7 +374,7 @@ function visibleTasks(){
   const ref=new Date();
   let list=doc.tasks.map(t=>({t,...scoreTask(t,doc.tasks,ref)}));
   if(ui.client!=='all') list=list.filter(x=>x.t.client===ui.client);
-  if(ui.status==='active') list=list.filter(x=>['open','in_progress','staged'].includes(x.t.status));
+  if(ui.status==='active') list=list.filter(x=>ACTIVE.includes(x.t.status));
   else if(ui.status!=='all') list=list.filter(x=>x.t.status===ui.status);
   if(ui.tag) list=list.filter(x=>(x.t.tags||[]).includes(ui.tag));
   if(ui.q){ const q=ui.q.toLowerCase();
@@ -447,6 +449,7 @@ function rowHTML(x,ref){
 }
 function renderBoard(list,ref){
   const wrap=document.createElement('div'); wrap.className='board';
+  wrap.style.gridTemplateColumns='repeat('+BOARD_COLS.length+',minmax(0,1fr))';
   BOARD_COLS.forEach(col=>{
     const items=list.filter(x=>x.t.status===col);
     const c=document.createElement('div'); c.className='col'; c.dataset.col=col;
@@ -475,17 +478,17 @@ function renderBoard(list,ref){
 function renderChips(){
   const ref=new Date();
   const cc=document.getElementById('clientChips');
-  const counts={}; doc.tasks.forEach(t=>{ if(['open','in_progress','staged'].includes(t.status)) counts[t.client]=(counts[t.client]||0)+1; });
+  const counts={}; doc.tasks.forEach(t=>{ if(ACTIVE.includes(t.status)) counts[t.client]=(counts[t.client]||0)+1; });
   const all=Object.values(counts).reduce((a,b)=>a+b,0);
   cc.innerHTML = chip('all','All',all,ui.client==='all','#1A1A2E')+
     clientList().map(c=>chip(c,c,counts[c]||0,ui.client===c,clientColor(c))).join('');
   cc.querySelectorAll('[data-chip]').forEach(el=>el.onclick=()=>{ ui.client=el.dataset.chip; render(); });
   const sc=document.getElementById('statusChips');
-  const opts=[['active','Active'],['open','Open'],['in_progress','In progress'],['staged','Staged'],['done','Done'],['deferred','Deferred'],['all','All']];
+  const opts=[['active','Active'],['open','Open'],['in_progress','In progress'],['blocked','Blocked'],['staged','Staged'],['done','Done'],['deferred','Deferred'],['all','All']];
   sc.innerHTML=opts.map(([v,l])=>{
-    const n = v==='active'?doc.tasks.filter(t=>['open','in_progress','staged'].includes(t.status)).length
+    const n = v==='active'?doc.tasks.filter(t=>ACTIVE.includes(t.status)).length
             : v==='all'?doc.tasks.length : doc.tasks.filter(t=>t.status===v).length;
-    return `<button class="chip ${ui.status===v?'on':''}" data-st="${v}" ${ui.status===v?`style="background:${v==='done'?'#00B67E':'#475569'}"`:''}>${l}<span class="ct">${n}</span></button>`;
+    return `<button class="chip ${ui.status===v?'on':''}" data-st="${v}" ${ui.status===v?`style="background:${STATUS_COLOR[v]||'#475569'}"`:''}>${l}<span class="ct">${n}</span></button>`;
   }).join('');
   sc.querySelectorAll('[data-st]').forEach(el=>el.onclick=()=>{ ui.status=el.dataset.st; render(); });
 }
@@ -493,7 +496,7 @@ function chip(val,label,count,on,color){
   return `<button class="chip ${on?'on':''}" data-chip="${esc(val)}" ${on?`style="background:${color}"`:''}>${esc(label)}<span class="ct">${count}</span></button>`;
 }
 function renderStatline(){
-  const ref=new Date(); const active=doc.tasks.filter(t=>['open','in_progress','staged'].includes(t.status));
+  const ref=new Date(); const active=doc.tasks.filter(t=>ACTIVE.includes(t.status));
   const overdue=active.filter(t=>{const ed=effDue(t);return ed&&ed<ref;}).length;
   const undated=active.filter(t=>!t.due_date&&!t.smart_date).length;
   const inprog=doc.tasks.filter(t=>t.status==='in_progress').length;
