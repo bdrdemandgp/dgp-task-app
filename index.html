@@ -578,11 +578,13 @@ function openDrawer(id){
   foot.innerHTML = isNew
     ? `<button class="btn primary" id="d_save">Create task</button><button class="btn ghost" id="d_cancel">Cancel</button>`
     : `<button class="btn primary" id="d_save">Save</button>`+
+      `<button class="btn primary" id="d_saveprev">↑ Save &amp; prev</button>`+
       `<button class="btn primary" id="d_savenext">Save &amp; next ↓</button>`+
       (t.status!=='done'?`<button class="btn ghost" id="d_done">✓ Close out</button>`:`<button class="btn ghost" id="d_reopen">↺ Reopen</button>`)+
       `<div class="spacer"></div><button class="btn danger" id="d_del">Delete</button>`;
   foot.querySelector('#d_save').onclick=()=>saveDrawer();
-  if(foot.querySelector('#d_savenext')) foot.querySelector('#d_savenext').onclick=()=>saveDrawerAndNext();
+  if(foot.querySelector('#d_saveprev')) foot.querySelector('#d_saveprev').onclick=()=>saveDrawerAndStep(-1);
+  if(foot.querySelector('#d_savenext')) foot.querySelector('#d_savenext').onclick=()=>saveDrawerAndStep(1);
   if(foot.querySelector('#d_cancel')) foot.querySelector('#d_cancel').onclick=closeDrawer;
   if(foot.querySelector('#d_done')) foot.querySelector('#d_done').onclick=()=>{ collectDraft(); ui._draft.status='done'; commitDraft(); };
   if(foot.querySelector('#d_reopen')) foot.querySelector('#d_reopen').onclick=()=>{ collectDraft(); ui._draft.status='open'; commitDraft(); };
@@ -606,18 +608,19 @@ function collectDraft(){
   d.notes=g('f_notes').value;
 }
 function saveDrawer(){ collectDraft(); commitDraft(); }
-function saveDrawerAndNext(){
-  // capture the next task in the order currently on screen, before saving may reshuffle it
-  const nextId=nextVisibleId(ui.editingId);
+function saveDrawerAndStep(dir){
+  // capture the neighbouring task in the order currently on screen, before saving may reshuffle it
+  const stepId=stepVisibleId(ui.editingId,dir);
   collectDraft();
   if(!commitDraft()) return;            // validation failed → stay put
-  if(nextId){ openDrawer(nextId); }
-  else toast('That was the last task in the list');
+  if(stepId){ openDrawer(stepId); }
+  else toast(dir<0?'That was the first task in the list':'That was the last task in the list');
 }
-function nextVisibleId(currentId){
+function stepVisibleId(currentId,dir){
   const list=visibleTasks();
   const i=list.findIndex(x=>x.t.id===currentId);
-  return (i>=0 && i+1<list.length) ? list[i+1].t.id : null;
+  const j=i+dir;
+  return (i>=0 && j>=0 && j<list.length) ? list[j].t.id : null;
 }
 function commitDraft(){
   const d=ui._draft;
