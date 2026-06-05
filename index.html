@@ -83,8 +83,9 @@
   .tright{display:flex;flex-direction:column;align-items:flex-end;gap:4px;text-align:right;min-width:96px;}
   .when{font-size:12px;font-weight:600;} .when.over{color:var(--red);} .when.soon{color:var(--amber);}
   .est{font-size:11px;color:var(--muted);}
-  .stsel{font-size:11px;font-weight:700;border-radius:6px;padding:3px 7px;border:1px solid transparent;
+  .stsel,.prsel{font-size:11px;font-weight:700;border-radius:6px;padding:3px 7px;border:1px solid transparent;
     color:#fff;-webkit-appearance:none;appearance:none;cursor:pointer;text-align:center;}
+  .prsel{padding:3px 5px;min-width:34px;}
 
   /* ---------- board view ---------- */
   .board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:start;}
@@ -270,7 +271,7 @@ let WEIGHTS = {
   "big_task_minutes_threshold": 120,
   "max_score_cap": 100
 };
-const BUILD_DATE = "2026-06-04-shell";
+const BUILD_DATE = "2026-06-05-shell";
 const LS_KEY = "dgp_tasks_v1";
 
 /* Clients are NOT hardcoded — derived from the data so the hosted shell carries
@@ -294,6 +295,10 @@ const STATUS_COLOR = {open:"#64748b",in_progress:"#1A5FAB",blocked:"#d97706",sta
 const BOARD_COLS = ["open","in_progress","blocked","staged","done"];
 // "active" = anything still in flight (incl. blocked, so waiting-on-vendor tasks stay visible)
 const ACTIVE = ["open","in_progress","blocked","staged"];
+// Manual priority you set: 1 = highest … 5 = lowest (the default). Replaces the old computed score.
+const PRIO_COLOR = {1:"#dc2626",2:"#ea580c",3:"#d9a406",4:"#64748b",5:"#9ca3af"};
+const PRIO_LABEL = {1:"Highest",2:"High",3:"Medium",4:"Low",5:"Lowest"};
+function prio(t){ const p=parseInt(t&&t.priority,10); return (p>=1&&p<=5)?p:5; }
 
 /* ---------- state ---------- */
 let doc = load();
@@ -380,7 +385,7 @@ function visibleTasks(){
   if(ui.q){ const q=ui.q.toLowerCase();
     list=list.filter(x=>[x.t.title,x.t.description,x.t.notes,(x.t.tags||[]).join(' '),x.t.client].join(' ').toLowerCase().includes(q)); }
   const sorters={
-    priority:(a,b)=> b.score-a.score || ((effDue(a.t)||Infinity)-(effDue(b.t)||Infinity)),
+    priority:(a,b)=> prio(a.t)-prio(b.t) || ((effDue(a.t)||Infinity)-(effDue(b.t)||Infinity)),
     due:(a,b)=> (effDue(a.t)||8.64e15)-(effDue(b.t)||8.64e15),
     created:(a,b)=> (parseDT(b.t.created_date)||0)-(parseDT(a.t.created_date)||0),
     client:(a,b)=> (a.t.client||'').localeCompare(b.t.client||'') || b.score-a.score,
@@ -422,10 +427,14 @@ function render(){
   html.push('</div>');
   main.innerHTML=html.join('');
   main.querySelectorAll('.trow').forEach(r=>{
-    r.addEventListener('click',e=>{ if(e.target.closest('.stsel'))return; openDrawer(r.dataset.id); });
+    r.addEventListener('click',e=>{ if(e.target.closest('.stsel')||e.target.closest('.prsel'))return; openDrawer(r.dataset.id); });
   });
   main.querySelectorAll('.stsel').forEach(sel=>{
     sel.addEventListener('change',e=>{ e.stopPropagation(); setStatus(sel.dataset.id, sel.value); });
+    sel.addEventListener('click',e=>e.stopPropagation());
+  });
+  main.querySelectorAll('.prsel').forEach(sel=>{
+    sel.addEventListener('change',e=>{ e.stopPropagation(); setPriority(sel.dataset.id, parseInt(sel.value,10)); });
     sel.addEventListener('click',e=>e.stopPropagation());
   });
 }
@@ -434,12 +443,15 @@ function rowHTML(x,ref){
   const tags=(t.tags||[]).slice(0,3).map(g=>`<span class="tag">${esc(g)}</span>`).join('');
   const stsel=`<select class="stsel" data-id="${t.id}" style="background:${STATUS_COLOR[t.status]}">`+
     STATUSES.map(s=>`<option value="${s}" ${s===t.status?'selected':''}>${STATUS_LABEL[s]}</option>`).join('')+`</select>`;
+  const prsel=`<select class="prsel" data-id="${t.id}" title="Priority — 1 highest, 5 lowest" style="background:${PRIO_COLOR[prio(t)]}">`+
+    [1,2,3,4,5].map(n=>`<option value="${n}" ${prio(t)===n?'selected':''}>P${n}</option>`).join('')+`</select>`;
+  const badge=t.status==='done'?'<span>✓</span>':`${prio(t)}<small>PRIO</small>`;
   return `<div class="trow" data-id="${t.id}">
-    <div class="score ${scoreClass(x)}">${x.t.status==='done'?'✓':x.score}${x.t.status==='done'?'':'<small>PRI</small>'}</div>
+    <div class="score" style="background:${t.status==='done'?'#00B67E':PRIO_COLOR[prio(t)]}">${badge}</div>
     <div class="tcli-col"><span class="ctag" style="background:${cc}">${esc(t.client||'—')}</span></div>
     <div class="tmid">
       <div class="ttl">${esc(t.title)}</div>
-      <div class="meta">${stsel}${flagPills(x.flags)}${tags}</div>
+      <div class="meta">${prsel}${stsel}${flagPills(x.flags)}${tags}</div>
     </div>
     <div class="tright">
       <span class="when ${w.cls}">${w.txt}</span>
@@ -461,7 +473,7 @@ function renderBoard(list,ref){
       card.style.borderLeftColor=cc;
       card.innerHTML=`<div class="ct">${esc(t.title)}</div><div class="cm">
         <span class="ctag" style="background:${cc};font-size:10px;padding:2px 7px">${esc(t.client||'—')}</span>
-        ${t.status!=='done'?`<span class="tag">${x.score} pri</span>`:''}${flagPills(x.flags)}</div>`;
+        ${t.status!=='done'?`<span class="tag" style="background:${PRIO_COLOR[prio(t)]};color:#fff">P${prio(t)}</span>`:''}${flagPills(x.flags)}</div>`;
       card.addEventListener('click',()=>openDrawer(t.id));
       card.addEventListener('dragstart',e=>{ e.dataTransfer.setData('text/plain',t.id); card.classList.add('dragging'); });
       card.addEventListener('dragend',()=>card.classList.remove('dragging'));
@@ -518,6 +530,11 @@ function setStatus(id,status){
   save(); render(); if(ui.editingId===id) openDrawer(id);
   toast(`${t.title.slice(0,32)} → ${STATUS_LABEL[status]}`);
 }
+function setPriority(id,p){
+  const t=getTask(id); if(!t)return; t.priority=p; save(); render();
+  if(ui.editingId===id) openDrawer(id);
+  toast(`${t.title.slice(0,28)} → Priority ${p} (${PRIO_LABEL[p]})`);
+}
 function newId(){
   const d=new Date(); const p=n=>String(n).padStart(2,'0');
   let base='t'+p(d.getMonth()+1)+p(d.getDate())+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds());
@@ -525,7 +542,7 @@ function newId(){
 }
 function blankTask(){
   return {id:newId(),title:'',description:'',client:ui.client!=='all'?ui.client:(clientList()[0]||''),due_date:null,
-    smart_date:null,next_action_date:null,start_date:null,estimated_minutes:null,status:'open',
+    smart_date:null,next_action_date:null,start_date:null,estimated_minutes:null,status:'open',priority:5,
     created_date:nowISO(),completed_date:null,source:'manual',depends_on:[],tags:[],notes:''};
 }
 
@@ -535,7 +552,6 @@ function openDrawer(id){
   if(id==='__new__'){ t=blankTask(); isNew=true; } else { t=getTask(id); if(!t)return; }
   ui.editingId=isNew?null:id; ui._draft=JSON.parse(JSON.stringify(t)); ui._isNew=isNew;
   document.getElementById('drawerTitle').textContent=isNew?'New task':'Edit task';
-  const ref=new Date(); const sc=scoreTask(t,doc.tasks,ref);
   const body=document.getElementById('drawerBody');
   body.innerHTML=`
     <div class="fld"><label>Title</label><input id="f_title" value="${esc(t.title)}" placeholder="What needs to happen?"></div>
@@ -543,6 +559,8 @@ function openDrawer(id){
       <div class="fld"><label>Client</label><input id="f_client" list="clientOpts" value="${esc(t.client||'')}" placeholder="Client name" autocomplete="off"><datalist id="clientOpts">${clientList().map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
       <div class="fld"><label>Status</label><select id="f_status">${STATUSES.map(s=>`<option value="${s}" ${s===t.status?'selected':''}>${STATUS_LABEL[s]}</option>`).join('')}</select></div>
     </div>
+    <div class="fld"><label>Priority &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">(1 = highest · 5 = lowest)</span></label>
+      <select id="f_prio">${[1,2,3,4,5].map(n=>`<option value="${n}" ${prio(t)===n?'selected':''}>${n} — ${PRIO_LABEL[n]}${n===5?' (default)':''}</option>`).join('')}</select></div>
     <div class="grid2">
       <div class="fld"><label>Due date</label><input type="date" id="f_due" value="${dateInputVal(t.due_date)}"></div>
       <div class="fld"><label>Est. minutes</label><input type="number" id="f_est" min="0" step="15" value="${t.estimated_minutes||''}" placeholder="e.g. 60"></div>
@@ -554,7 +572,6 @@ function openDrawer(id){
     <div class="fld"><label>Tags (comma-separated)</label><input id="f_tags" value="${esc((t.tags||[]).join(', '))}" placeholder="client-facing, campaign, email"></div>
     <div class="fld"><label>Description</label><textarea id="f_desc" placeholder="Short summary">${esc(t.description)}</textarea></div>
     <div class="fld"><label>Notes / log</label><textarea id="f_notes" style="min-height:90px" placeholder="Running notes…">${esc(t.notes)}</textarea></div>
-    ${!isNew?`<div class="whybox"><b>Priority ${sc.score}</b>${sc.why.length?' — '+sc.why.map(esc).join('; '):' (no boosts)'}</div>`:''}
     <div style="font-size:11px;color:var(--muted)">ID ${t.id} · source ${esc(t.source||'manual')}${t.completed_date?' · done '+fmtDate(parseDT(t.completed_date)):''}</div>
   `;
   const foot=document.getElementById('drawerFoot');
@@ -577,6 +594,7 @@ function collectDraft(){
   const d=ui._draft;
   d.title=g('f_title').value.trim();
   d.client=g('f_client').value.trim(); rememberClient(d.client); d.status=g('f_status').value;
+  d.priority=parseInt(g('f_prio').value,10)||5;
   d.due_date=dateInputToISO(g('f_due').value);
   d.start_date=dateInputToISO(g('f_start').value);
   d.next_action_date=dateInputToISO(g('f_next').value);
