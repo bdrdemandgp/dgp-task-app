@@ -33,6 +33,9 @@
   .hbtn:hover{background:rgba(255,255,255,.20);}
   .hbtn.primary{background:var(--green);color:var(--navy);}
   .hbtn.primary:hover{background:#13c98f;}
+  .hbtn.undo{background:var(--amber);color:#3a2a00;font-weight:800;padding:7px 16px;}
+  .hbtn.undo:hover{background:#f0b400;}
+  .hbtn.undo:disabled{background:rgba(255,255,255,.10);color:rgba(255,255,255,.45);cursor:default;font-weight:600;}
   .savestate{font-size:11.5px;opacity:.65;min-width:80px;}
 
   /* ---------- toolbar ---------- */
@@ -175,6 +178,7 @@
   <div class="brand"><span class="dot">D</span>DGP Task Manager <small id="today"></small></div>
   <div class="spacer"></div>
   <span class="savestate" id="savestate"></span>
+  <button class="hbtn undo" id="btnUndo" title="Undo the last change — keep clicking to step further back" disabled>↶ Undo</button>
   <button class="sync" id="btnSync" title="GitHub sync settings"><span class="led"></span><span id="syncLabel">Local only</span></button>
   <button class="hbtn" id="btnImport" title="Load a tasks.json file">⇪ Import</button>
   <button class="hbtn" id="btnExport" title="Download tasks.json (exact schema)">⤓ JSON</button>
@@ -571,10 +575,35 @@ function renderStatline(){
     `<span style="opacity:.6">seed ${BUILD_DATE}</span>`;
 }
 
+/* ---------- undo history ---------- */
+// Snapshot the whole doc BEFORE each change; Undo pops the most recent snapshot.
+// Keep clicking to step back through changes in reverse order.
+let undoStack=[]; const UNDO_MAX=80;
+function pushUndo(label){
+  try{ undoStack.push({s:JSON.stringify(doc),label}); }catch(e){ return; }
+  if(undoStack.length>UNDO_MAX) undoStack.shift();
+  updateUndoBtn();
+}
+function undo(){
+  if(!undoStack.length){ toast('Nothing to undo'); return; }
+  const snap=undoStack.pop();
+  let prev; try{ prev=JSON.parse(snap.s); }catch(e){ toast('Undo failed'); return; }
+  doc=prev; closeDrawer(); save(); render(); updateUndoBtn();
+  toast(`↶ Undid: ${snap.label}`);
+}
+function updateUndoBtn(){
+  const b=document.getElementById('btnUndo'); if(!b) return;
+  b.disabled=!undoStack.length;
+  b.textContent = undoStack.length?`↶ Undo (${undoStack.length})`:'↶ Undo';
+  if(undoStack.length) b.title=`Undo: ${undoStack[undoStack.length-1].label} — keep clicking to step further back`;
+}
+
 /* ---------- mutations ---------- */
 function getTask(id){ return doc.tasks.find(t=>t.id===id); }
 function setStatus(id,status){
-  const t=getTask(id); if(!t)return; const prev=t.status; t.status=status;
+  const t=getTask(id); if(!t)return; const prev=t.status;
+  pushUndo(`${t.title.slice(0,28)} → ${STATUS_LABEL[status]}`);
+  t.status=status;
   if(status==='done'&&!t.completed_date) t.completed_date=nowISO();
   if(status!=='done') t.completed_date=null;
   const spawned=(status==='done'&&prev!=='done')?spawnRecurrence(t):null;
@@ -597,7 +626,7 @@ function spawnRecurrence(task){
   return n;
 }
 function setPriority(id,p){
-  const t=getTask(id); if(!t)return; t.priority=p; save(); render();
+  const t=getTask(id); if(!t)return; pushUndo(`${t.title.slice(0,24)} → Priority ${p}`); t.priority=p; save(); render();
   if(ui.editingId===id) openDrawer(id);
   toast(`${t.title.slice(0,28)} → Priority ${p} (${PRIO_LABEL[p]})`);
 }
@@ -693,6 +722,7 @@ function stepVisibleId(currentId,dir){
 function commitDraft(){
   const d=ui._draft;
   if(!d.title){ toast('Title is required'); return false; }
+  pushUndo(ui._isNew?`Create "${d.title.slice(0,26)}"`:`Edit "${d.title.slice(0,26)}"`);
   if(d.status==='done'&&!d.completed_date) d.completed_date=nowISO();
   if(d.status!=='done') d.completed_date=null;
   let prevStatus=null;
@@ -705,7 +735,8 @@ function commitDraft(){
 }
 function delTask(id){
   const t=getTask(id); if(!t) return;
-  if(!confirm(`Delete "${t.title}"? This cannot be undone (export first if unsure).`)) return;
+  if(!confirm(`Delete "${t.title}"? You can still undo this with the Undo button.`)) return;
+  pushUndo(`Delete "${t.title.slice(0,26)}"`);
   doc.tasks=doc.tasks.filter(x=>x.id!==id); save(); closeDrawer(); render(); toast('Deleted');
 }
 function closeDrawer(){ ui.editingId=null; document.getElementById('scrim').classList.remove('open'); document.getElementById('drawer').classList.remove('open'); }
@@ -759,6 +790,7 @@ function importJSON(file){
   r.onload=()=>{ try{ const d=JSON.parse(r.result);
     if(!d||!Array.isArray(d.tasks)) throw new Error('no tasks array');
     if(!confirm(`Import ${d.tasks.length} tasks? This replaces your current working copy in this browser.`)) return;
+    pushUndo(`Import ${d.tasks.length} tasks`);
     doc=d; save(); render(); toast(`Imported ${d.tasks.length} tasks`);
   }catch(e){ alert('Could not import: '+e.message); } };
   r.readAsText(file);
@@ -891,6 +923,9 @@ function rebuildTagFilter(){
 document.getElementById('btnNew').onclick=()=>openDrawer('__new__');
 document.getElementById('btnExport').onclick=exportJSON;
 document.getElementById('btnExportCSV').onclick=exportCSV;
+document.getElementById('btnUndo').onclick=undo;
+document.addEventListener('keydown',e=>{ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&!/input|textarea|select/i.test((e.target.tagName||''))){ e.preventDefault(); undo(); } });
+updateUndoBtn();
 document.getElementById('btnImport').onclick=()=>document.getElementById('fileInput').click();
 document.getElementById('fileInput').onchange=e=>{ if(e.target.files[0]) importJSON(e.target.files[0]); e.target.value=''; };
 document.getElementById('drawerClose').onclick=closeDrawer;
