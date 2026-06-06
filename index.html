@@ -637,7 +637,7 @@ function newId(){
 }
 function blankTask(){
   return {id:newId(),title:'',description:'',client:ui.client!=='all'?ui.client:(clientList()[0]||''),due_date:null,
-    smart_date:null,start_date:null,estimated_minutes:null,status:'open',priority:5,recurrence:null,
+    smart_date:null,start_date:null,estimated_minutes:30,status:'open',priority:5,recurrence:null,
     created_date:nowISO(),completed_date:null,source:'manual',depends_on:[],tags:[],notes:''};
 }
 
