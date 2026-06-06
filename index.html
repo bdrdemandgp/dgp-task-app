@@ -62,27 +62,29 @@
   .group-h{font-size:11px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);
     margin:18px 4px 8px;display:flex;align-items:center;gap:8px;}
   .group-h .n{background:var(--line);color:var(--muted);border-radius:10px;padding:1px 8px;font-size:10.5px;}
-  .tlist{display:flex;flex-direction:column;gap:7px;}
-  .trow{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;
-    display:grid;grid-template-columns:42px max-content minmax(0,1fr) auto;gap:12px;align-items:center;cursor:pointer;
+  /* shared column template → header + every row line up like a table */
+  .tlist{display:flex;flex-direction:column;gap:6px;
+    --c:48px minmax(96px,140px) minmax(0,1fr) 132px 98px 84px 64px;}
+  .thead{display:grid;grid-template-columns:var(--c);gap:12px;padding:2px 14px 4px;
+    font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);}
+  .trow{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 12px;
+    display:grid;grid-template-columns:var(--c);gap:12px;align-items:center;cursor:pointer;
     transition:border-color .12s,box-shadow .12s;box-shadow:var(--shadow);}
   .trow:hover{border-color:#cdd1d8;box-shadow:0 2px 8px rgba(20,25,40,.10);}
-  .score{width:38px;height:38px;border-radius:9px;display:flex;flex-direction:column;align-items:center;
-    justify-content:center;font-weight:800;font-size:15px;color:#fff;line-height:1;}
-  .score small{font-size:7px;font-weight:700;opacity:.8;letter-spacing:.5px;margin-top:1px;}
-  .sc-hi{background:var(--red);} .sc-md{background:var(--amber);} .sc-lo{background:#9aa0aa;}
-  .sc-done{background:var(--green);}
-  .tmid .ttl{font-weight:600;color:var(--ink);}
-  .tmid .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:3px;align-items:center;}
+  .c-prio .prsel,.c-status .stsel{width:100%;}
+  .c-title{min-width:0;}
+  .c-title .ttl{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .c-title .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px;align-items:center;}
+  .celld{font-size:12px;color:var(--ink);font-weight:500;}
+  .cmuted{color:var(--muted);font-size:11px;}
   .pill{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:6px;display:inline-flex;align-items:center;gap:4px;}
   .ctag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:6px;color:#fff;white-space:nowrap;}
   .tag{font-size:10.5px;color:var(--muted);background:#f0f1f4;padding:2px 7px;border-radius:5px;font-weight:500;}
   .flag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;}
   .fl-overdue{background:#fde8e8;color:var(--red);} .fl-stale{background:#fff4e0;color:var(--amber);}
   .fl-block{background:#ede9fe;color:#6d28d9;} .fl-time{background:#e0f2fe;color:#0369a1;}
-  .tright{display:flex;flex-direction:column;align-items:flex-end;gap:4px;text-align:right;min-width:96px;}
   .when{font-size:12px;font-weight:600;} .when.over{color:var(--red);} .when.soon{color:var(--amber);}
-  .est{font-size:11px;color:var(--muted);}
+  .est{font-size:11px;color:var(--muted);white-space:nowrap;}
   .stsel,.prsel{font-size:11px;font-weight:700;border-radius:6px;padding:3px 7px;border:1px solid transparent;
     color:#fff;-webkit-appearance:none;appearance:none;cursor:pointer;text-align:center;}
   .prsel{padding:3px 5px;min-width:34px;}
@@ -156,9 +158,9 @@
   .synced-note{font-size:12px;color:var(--muted);}
 
   @media(max-width:820px){
-    .trow{grid-template-columns:36px 1fr;}
-    .trow .tcli-col{display:none;}
-    .tright{align-items:flex-start;text-align:left;}
+    .tlist{--c:44px minmax(0,1fr) 88px;}
+    .thead{display:none;}
+    .c-cli,.c-status,.c-start,.c-est{display:none;}
     .board{grid-template-columns:1fr;}
     .row1{gap:7px;}
   }
@@ -184,8 +186,8 @@
       <input id="search" placeholder="Search tasks, notes, tags…">
     </div>
     <select class="ctl" id="sortBy">
+      <option value="smart">Sort: Smart date</option>
       <option value="priority">Sort: Priority</option>
-      <option value="due">Sort: Due date</option>
       <option value="created">Sort: Newest</option>
       <option value="client">Sort: Client</option>
       <option value="title">Sort: Title A–Z</option>
@@ -303,7 +305,7 @@ function prio(t){ const p=parseInt(t&&t.priority,10); return (p>=1&&p<=5)?p:5; }
 
 /* ---------- state ---------- */
 let doc = load();
-let ui = { client:"all", status:"active", tag:"", q:"", sort:"priority", view:"list", editingId:null };
+let ui = { client:"all", status:"active", tag:"", q:"", sort:"smart", view:"list", editingId:null };
 
 /* ---------- persistence ---------- */
 function load(){
@@ -386,13 +388,14 @@ function visibleTasks(){
   if(ui.q){ const q=ui.q.toLowerCase();
     list=list.filter(x=>[x.t.title,x.t.description,x.t.notes,(x.t.tags||[]).join(' '),x.t.client].join(' ').toLowerCase().includes(q)); }
   const sorters={
+    // smart date ascending (soonest first), no-date tasks sink to the bottom, then priority as tiebreak
+    smart:(a,b)=> ((effDue(a.t)||Infinity)-(effDue(b.t)||Infinity)) || prio(a.t)-prio(b.t),
     priority:(a,b)=> prio(a.t)-prio(b.t) || ((effDue(a.t)||Infinity)-(effDue(b.t)||Infinity)),
-    due:(a,b)=> (effDue(a.t)||8.64e15)-(effDue(b.t)||8.64e15),
     created:(a,b)=> (parseDT(b.t.created_date)||0)-(parseDT(a.t.created_date)||0),
     client:(a,b)=> (a.t.client||'').localeCompare(b.t.client||'') || b.score-a.score,
     title:(a,b)=> (a.t.title||'').localeCompare(b.t.title||''),
   };
-  list.sort(sorters[ui.sort]||sorters.priority);
+  list.sort(sorters[ui.sort]||sorters.smart);
   return list;
 }
 
@@ -425,6 +428,7 @@ function render(){
   if(!list.length){ main.innerHTML=`<div class="empty"><div class="big">✅</div>No tasks match. Adjust filters or add a new task.</div>`; return; }
   // group by client when not already filtered to one and sorting by priority/client
   const html=[]; html.push('<div class="tlist">');
+  html.push(gridHeader());
   list.forEach(x=>html.push(rowHTML(x,ref)));
   html.push('</div>');
   main.innerHTML=html.join('');
@@ -440,25 +444,31 @@ function render(){
     sel.addEventListener('click',e=>e.stopPropagation());
   });
 }
+function gridHeader(){
+  return `<div class="thead">
+    <div>Prio</div><div>Client</div><div>Task</div><div>Status</div><div>Smart&nbsp;date</div><div>Start</div><div>Est</div>
+  </div>`;
+}
 function rowHTML(x,ref){
   const t=x.t, w=whenInfo(t,ref), cc=clientColor(t.client);
-  const tags=(t.tags||[]).slice(0,3).map(g=>`<span class="tag">${esc(g)}</span>`).join('');
+  const tags=(t.tags||[]).slice(0,2).map(g=>`<span class="tag">${esc(g)}</span>`).join('');
   const stsel=`<select class="stsel" data-id="${t.id}" style="background:${STATUS_COLOR[t.status]}">`+
     STATUSES.map(s=>`<option value="${s}" ${s===t.status?'selected':''}>${STATUS_LABEL[s]}</option>`).join('')+`</select>`;
-  const prsel=`<select class="prsel" data-id="${t.id}" title="Priority — 1 highest, 5 lowest" style="background:${PRIO_COLOR[prio(t)]}">`+
+  const prsel=`<select class="prsel" data-id="${t.id}" title="Priority — 1 highest, 5 lowest" style="background:${t.status==='done'?'#00B67E':PRIO_COLOR[prio(t)]}">`+
     [1,2,3,4,5].map(n=>`<option value="${n}" ${prio(t)===n?'selected':''}>P${n}</option>`).join('')+`</select>`;
-  const badge=t.status==='done'?'<span>✓</span>':`${prio(t)}<small>PRIO</small>`;
+  const start=parseDT(t.start_date);
+  const metas=`${flagPills(x.flags)}${tags}`;
   return `<div class="trow" data-id="${t.id}">
-    <div class="score" style="background:${t.status==='done'?'#00B67E':PRIO_COLOR[prio(t)]}">${badge}</div>
-    <div class="tcli-col"><span class="ctag" style="background:${cc}">${esc(t.client||'—')}</span></div>
-    <div class="tmid">
+    <div class="c-prio">${prsel}</div>
+    <div class="c-cli"><span class="ctag" style="background:${cc}">${esc(t.client||'—')}</span></div>
+    <div class="c-title">
       <div class="ttl">${esc(t.title)}</div>
-      <div class="meta">${prsel}${stsel}${flagPills(x.flags)}${tags}</div>
+      ${metas.trim()?`<div class="meta">${metas}</div>`:''}
     </div>
-    <div class="tright">
-      <span class="when ${w.cls}">${w.txt}</span>
-      ${t.estimated_minutes?`<span class="est">⏱ ${estTxt(t.estimated_minutes)}</span>`:''}
-    </div>
+    <div class="c-status">${stsel}</div>
+    <div class="c-smart"><span class="when ${w.cls}">${w.txt}</span></div>
+    <div class="c-start">${start?`<span class="celld">${fmtDate(start)}</span>`:'<span class="cmuted">—</span>'}</div>
+    <div class="c-est">${t.estimated_minutes?`<span class="est">⏱ ${estTxt(t.estimated_minutes)}</span>`:'<span class="cmuted">—</span>'}</div>
   </div>`;
 }
 function renderBoard(list,ref){
@@ -544,7 +554,7 @@ function newId(){
 }
 function blankTask(){
   return {id:newId(),title:'',description:'',client:ui.client!=='all'?ui.client:(clientList()[0]||''),due_date:null,
-    smart_date:null,next_action_date:null,start_date:null,estimated_minutes:null,status:'open',priority:5,
+    smart_date:null,start_date:null,estimated_minutes:null,status:'open',priority:5,
     created_date:nowISO(),completed_date:null,source:'manual',depends_on:[],tags:[],notes:''};
 }
 
@@ -564,13 +574,10 @@ function openDrawer(id){
     <div class="fld"><label>Priority &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">(1 = highest · 5 = lowest)</span></label>
       <select id="f_prio">${[1,2,3,4,5].map(n=>`<option value="${n}" ${prio(t)===n?'selected':''}>${n} — ${PRIO_LABEL[n]}${n===5?' (default)':''}</option>`).join('')}</select></div>
     <div class="grid2">
-      <div class="fld"><label>Due date</label><input type="date" id="f_due" value="${dateInputVal(t.due_date)}"></div>
-      <div class="fld"><label>Est. minutes</label><input type="number" id="f_est" min="0" step="15" value="${t.estimated_minutes||''}" placeholder="e.g. 60"></div>
-    </div>
-    <div class="grid2">
+      <div class="fld"><label>Smart date</label><input type="date" id="f_due" value="${dateInputVal(effDue(t))}"></div>
       <div class="fld"><label>Start date</label><input type="date" id="f_start" value="${dateInputVal(t.start_date)}"></div>
-      <div class="fld"><label>Next action</label><input type="date" id="f_next" value="${dateInputVal(t.next_action_date)}"></div>
     </div>
+    <div class="fld"><label>Est. minutes</label><input type="number" id="f_est" min="0" step="15" value="${t.estimated_minutes||''}" placeholder="e.g. 60"></div>
     <div class="fld"><label>Tags (comma-separated)</label><input id="f_tags" value="${esc((t.tags||[]).join(', '))}" placeholder="client-facing, campaign, email"></div>
     <div class="fld"><label>Description</label><textarea id="f_desc" placeholder="Short summary">${esc(t.description)}</textarea></div>
     <div class="fld"><label>Notes / log</label><textarea id="f_notes" style="min-height:90px" placeholder="Running notes…">${esc(t.notes)}</textarea></div>
@@ -602,8 +609,8 @@ function collectDraft(){
   d.client=g('f_client').value.trim(); rememberClient(d.client); d.status=g('f_status').value;
   d.priority=parseInt(g('f_prio').value,10)||5;
   d.due_date=dateInputToISO(g('f_due').value);
+  d.smart_date=null;          // Smart date field is now the single source — drop the intake fallback once a task is edited
   d.start_date=dateInputToISO(g('f_start').value);
-  d.next_action_date=dateInputToISO(g('f_next').value);
   d.estimated_minutes=g('f_est').value?parseInt(g('f_est').value,10):null;
   d.tags=g('f_tags').value.split(',').map(s=>s.trim()).filter(Boolean);
   d.description=g('f_desc').value.trim();
@@ -664,9 +671,8 @@ function exportCSV(){
     ['Priority label', x=>PRIO_LABEL[prio(x.t)]||''],
     ['Score',     x=>Math.round(x.score)],
     ['Flags',     x=>(x.flags||[]).join(' ')],
-    ['Due date',  x=>dateInputVal(x.t.due_date)],
+    ['Smart date',x=>dateInputVal(effDue(x.t))],
     ['Start date',x=>dateInputVal(x.t.start_date)],
-    ['Next action',x=>dateInputVal(x.t.next_action_date)],
     ['Est. minutes',x=>x.t.estimated_minutes||''],
     ['Tags',      x=>(x.t.tags||[]).join(', ')],
     ['Description',x=>x.t.description||''],
