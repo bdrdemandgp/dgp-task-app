@@ -420,6 +420,7 @@ function render(){
   renderStatline();
   const main=document.getElementById('main');
   const list=visibleTasks();
+  document.getElementById('btnExportCSV').textContent = `⤓ CSV (${list.length})`; // count of what's in view
   if(ui.view==='board'){ main.innerHTML=''; main.appendChild(renderBoard(list,ref)); return; }
   if(!list.length){ main.innerHTML=`<div class="empty"><div class="big">✅</div>No tasks match. Adjust filters or add a new task.</div>`; return; }
   // group by client when not already filtered to one and sorting by priority/client
