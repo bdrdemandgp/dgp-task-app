@@ -304,6 +304,27 @@ function clientList(){
 }
 function rememberClient(name){ if(!name) return; const s=new Set(clientList()); s.add(name);
   localStorage.setItem(EXTRA_CLIENTS_KEY, JSON.stringify([...s])); }
+// Client picker: a dropdown of known clients (keeps names standardized) + an "add new" escape hatch.
+function clientOptionsInner(selected){
+  return clientList().map(c=>`<option value="${esc(c)}" ${c===selected?'selected':''}>${esc(c)}</option>`).join('')
+    + `<option value="__add__">＋ Add new client…</option>`;
+}
+function clientSelectHTML(selected){
+  const blank = selected ? '' : `<option value="" selected disabled>— select client —</option>`;
+  return `<select id="f_client">${blank}${clientOptionsInner(selected)}</select>`;
+}
+function wireClientSelect(){
+  const sel=document.getElementById('f_client'); if(!sel) return;
+  sel._prev=sel.value;
+  sel.addEventListener('change',()=>{
+    if(sel.value==='__add__'){
+      const name=(prompt('New client name (keep it standardized — this becomes the canonical label):')||'').trim();
+      if(name){ rememberClient(name); sel.innerHTML=clientOptionsInner(name); }
+      else { sel.value=sel._prev||''; }
+    }
+    sel._prev=sel.value;
+  });
+}
 // deterministic color from the client name (no name→color table in source)
 const CLIENT_PALETTE=["#f4811e","#1A5FAB","#7c3aed","#00B67E","#0891b2","#db2777","#ca8a04","#475569","#0f766e","#9333ea"];
 function clientColor(name){ if(!name) return '#6b7280'; let h=0; for(let i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))>>>0; return CLIENT_PALETTE[h%CLIENT_PALETTE.length]; }
@@ -666,7 +687,7 @@ function openDrawer(id){
   body.innerHTML=`
     <div class="fld"><label>Title</label><input id="f_title" value="${esc(t.title)}" placeholder="What needs to happen?"></div>
     <div class="grid2">
-      <div class="fld"><label>Client</label><input id="f_client" list="clientOpts" value="${esc(t.client||'')}" placeholder="Client name" autocomplete="off"><datalist id="clientOpts">${clientList().map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
+      <div class="fld"><label>Client</label>${clientSelectHTML(t.client||'')}</div>
       <div class="fld"><label>Status</label><select id="f_status">${STATUSES.map(s=>`<option value="${s}" ${s===t.status?'selected':''}>${STATUS_LABEL[s]}</option>`).join('')}</select></div>
     </div>
     <div class="fld"><label>Priority &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">(1 = highest · 5 = lowest)</span></label>
@@ -706,6 +727,7 @@ function openDrawer(id){
   if(foot.querySelector('#d_done')) foot.querySelector('#d_done').onclick=()=>{ collectDraft(); ui._draft.status='done'; commitDraft(); };
   if(foot.querySelector('#d_reopen')) foot.querySelector('#d_reopen').onclick=()=>{ collectDraft(); ui._draft.status='open'; commitDraft(); };
   if(foot.querySelector('#d_del')) foot.querySelector('#d_del').onclick=()=>delTask(t.id);
+  wireClientSelect();
   document.getElementById('scrim').classList.add('open');
   document.getElementById('drawer').classList.add('open');
   setTimeout(()=>document.getElementById('f_title').focus(),150);
@@ -714,7 +736,7 @@ function collectDraft(){
   const g=id=>document.getElementById(id);
   const d=ui._draft;
   d.title=g('f_title').value.trim();
-  d.client=g('f_client').value.trim(); rememberClient(d.client); d.status=g('f_status').value;
+  let cv=g('f_client').value; if(cv==='__add__') cv=''; d.client=cv.trim(); rememberClient(d.client); d.status=g('f_status').value;
   d.priority=parseInt(g('f_prio').value,10)||5;
   d.due_date=dateInputToISO(g('f_due').value);
   d.smart_date=null;          // Smart date field is now the single source — drop the intake fallback once a task is edited
