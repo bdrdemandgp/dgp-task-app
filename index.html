@@ -78,6 +78,7 @@
   .c-title{min-width:0;}
   .c-title .ttl{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .c-title .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px;align-items:center;}
+  .rep{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:#eef2ff;color:#4338ca;}
   .celld{font-size:12px;color:var(--ink);font-weight:500;}
   .cmuted{color:var(--muted);font-size:11px;}
   .pill{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:6px;display:inline-flex;align-items:center;gap:4px;}
@@ -299,6 +300,8 @@ function clientColor(name){ if(!name) return '#6b7280'; let h=0; for(let i=0;i<n
 // weight key derived from name; matches weights.json convention (hyphens dropped)
 function clientWeightKey(name){ return 'client_'+name.replace(/[^a-z0-9 ]/gi,'').trim().toLowerCase().replace(/\s+/g,'_'); }
 const STATUSES = ["open","in_progress","blocked","staged","done","deferred"];
+// recurrence: closing a task with one of these auto-creates the next occurrence
+const REPEAT_LABEL = {weekly:"Weekly",biweekly:"Every 2 weeks",monthly:"Monthly",quarterly:"Quarterly"};
 const STATUS_LABEL = {open:"Open",in_progress:"In progress",blocked:"Blocked",staged:"Staged",done:"Done",deferred:"Deferred"};
 const STATUS_COLOR = {open:"#64748b",in_progress:"#1A5FAB",blocked:"#d97706",staged:"#8b5cf6",done:"#00B67E",deferred:"#9ca3af"};
 const BOARD_COLS = ["open","in_progress","blocked","staged","done"];
@@ -358,6 +361,17 @@ function dateInputVal(s){ const d=parseDT(s); if(!d) return "";
   const o={}; new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d).forEach(p=>o[p.type]=p.value);
   return `${o.year}-${o.month}-${o.day}`; }
 function dateInputToISO(v){ return v? `${v}T17:00:00-05:00` : null; }
+function addMonthsClamped(d,n){ const day=d.getDate(); d.setDate(1); d.setMonth(d.getMonth()+n);
+  const dim=new Date(d.getFullYear(),d.getMonth()+1,0).getDate(); d.setDate(Math.min(day,dim)); } // Jan31 +1mo → Feb28/29
+function advanceISO(iso,rec){            // move a date one recurrence period forward; null anchor → from today
+  const d=parseDT(iso)||new Date();
+  if(rec==='weekly') d.setDate(d.getDate()+7);
+  else if(rec==='biweekly') d.setDate(d.getDate()+14);
+  else if(rec==='monthly') addMonthsClamped(d,1);
+  else if(rec==='quarterly') addMonthsClamped(d,3);
+  else return iso;
+  return toEasternISO(d);
+}
 
 /* ---------- scoring (port of prioritize.py) ---------- */
 function scoreTask(t, all, ref){
@@ -480,7 +494,8 @@ function rowHTML(x,ref){
   const prsel=`<select class="prsel" data-id="${t.id}" title="Priority — 1 highest, 5 lowest" style="background:${t.status==='done'?'#00B67E':PRIO_COLOR[prio(t)]}">`+
     [1,2,3,4,5].map(n=>`<option value="${n}" ${prio(t)===n?'selected':''}>P${n}</option>`).join('')+`</select>`;
   const start=parseDT(t.start_date);
-  const metas=`${flagPills(x.flags)}${tags}`;
+  const rep=t.recurrence&&REPEAT_LABEL[t.recurrence]?`<span class="rep">🔁 ${REPEAT_LABEL[t.recurrence]}</span>`:'';
+  const metas=`${flagPills(x.flags)}${rep}${tags}`;
   return `<div class="trow" data-id="${t.id}">
     <div class="c-prio">${prsel}</div>
     <div class="c-cli"><span class="ctag" style="background:${cc}">${esc(t.client||'—')}</span></div>
@@ -562,8 +577,24 @@ function setStatus(id,status){
   const t=getTask(id); if(!t)return; const prev=t.status; t.status=status;
   if(status==='done'&&!t.completed_date) t.completed_date=nowISO();
   if(status!=='done') t.completed_date=null;
+  const spawned=(status==='done'&&prev!=='done')?spawnRecurrence(t):null;
   save(); render(); if(ui.editingId===id) openDrawer(id);
-  toast(`${t.title.slice(0,32)} → ${STATUS_LABEL[status]}`);
+  toast(spawned?`🔁 Next ${REPEAT_LABEL[t.recurrence]} task created${spawned.due_date?` — ${fmtDate(parseDT(spawned.due_date))}`:''}`
+              :`${t.title.slice(0,32)} → ${STATUS_LABEL[status]}`);
+}
+// When a recurring task is completed, create its next occurrence (date advanced one period).
+// Guard: skip if an open instance of the same task already exists, so re-closing can't duplicate.
+function spawnRecurrence(task){
+  if(!task.recurrence || !REPEAT_LABEL[task.recurrence]) return null;
+  if(doc.tasks.some(x=> x.id!==task.id && x.status!=='done' && x.recurrence===task.recurrence
+       && x.title===task.title && (x.client||'')===(task.client||''))) return null;
+  const n=JSON.parse(JSON.stringify(task));
+  n.id=newId(); n.status='open'; n.completed_date=null; n.created_date=nowISO();
+  n.depends_on=[]; n.notes=''; n.source='recurring';
+  n.due_date=advanceISO(task.due_date||task.smart_date, task.recurrence); n.smart_date=null;
+  n.start_date=task.start_date?advanceISO(task.start_date, task.recurrence):null;
+  doc.tasks.unshift(n);
+  return n;
 }
 function setPriority(id,p){
   const t=getTask(id); if(!t)return; t.priority=p; save(); render();
@@ -577,7 +608,7 @@ function newId(){
 }
 function blankTask(){
   return {id:newId(),title:'',description:'',client:ui.client!=='all'?ui.client:(clientList()[0]||''),due_date:null,
-    smart_date:null,start_date:null,estimated_minutes:null,status:'open',priority:5,
+    smart_date:null,start_date:null,estimated_minutes:null,status:'open',priority:5,recurrence:null,
     created_date:nowISO(),completed_date:null,source:'manual',depends_on:[],tags:[],notes:''};
 }
 
@@ -600,7 +631,11 @@ function openDrawer(id){
       <div class="fld"><label>Smart date</label><input type="date" id="f_due" value="${dateInputVal(effDue(t))}"></div>
       <div class="fld"><label>Start date</label><input type="date" id="f_start" value="${dateInputVal(t.start_date)}"></div>
     </div>
-    <div class="fld"><label>Est. minutes</label><input type="number" id="f_est" min="0" step="15" value="${t.estimated_minutes||''}" placeholder="e.g. 60"></div>
+    <div class="grid2">
+      <div class="fld"><label>Est. minutes</label><input type="number" id="f_est" min="0" step="15" value="${t.estimated_minutes||''}" placeholder="e.g. 60"></div>
+      <div class="fld"><label>Repeat &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">(creates next on close)</span></label>
+        <select id="f_repeat"><option value="">Does not repeat</option>${Object.keys(REPEAT_LABEL).map(k=>`<option value="${k}" ${t.recurrence===k?'selected':''}>${REPEAT_LABEL[k]}</option>`).join('')}</select></div>
+    </div>
     <div class="fld"><label>Tags (comma-separated)</label><input id="f_tags" value="${esc((t.tags||[]).join(', '))}" placeholder="client-facing, campaign, email"></div>
     <div class="fld"><label>Description</label><textarea id="f_desc" placeholder="Short summary">${esc(t.description)}</textarea></div>
     <div class="fld"><label>Notes / log</label><textarea id="f_notes" style="min-height:90px" placeholder="Running notes…">${esc(t.notes)}</textarea></div>
@@ -635,6 +670,7 @@ function collectDraft(){
   d.smart_date=null;          // Smart date field is now the single source — drop the intake fallback once a task is edited
   d.start_date=dateInputToISO(g('f_start').value);
   d.estimated_minutes=g('f_est').value?parseInt(g('f_est').value,10):null;
+  d.recurrence=g('f_repeat').value||null;
   d.tags=g('f_tags').value.split(',').map(s=>s.trim()).filter(Boolean);
   d.description=g('f_desc').value.trim();
   d.notes=g('f_notes').value;
@@ -659,8 +695,11 @@ function commitDraft(){
   if(!d.title){ toast('Title is required'); return false; }
   if(d.status==='done'&&!d.completed_date) d.completed_date=nowISO();
   if(d.status!=='done') d.completed_date=null;
+  let prevStatus=null;
   if(ui._isNew){ doc.tasks.unshift(d); toast('Task created'); }
-  else { const i=doc.tasks.findIndex(t=>t.id===d.id); if(i>=0) doc.tasks[i]=d; toast('Saved'); }
+  else { const i=doc.tasks.findIndex(t=>t.id===d.id); if(i>=0){ prevStatus=doc.tasks[i].status; doc.tasks[i]=d; } toast('Saved'); }
+  const spawned=(d.status==='done'&&prevStatus!=='done')?spawnRecurrence(d):null;
+  if(spawned) toast(`🔁 Closed — next ${REPEAT_LABEL[d.recurrence]} task created${spawned.due_date?` for ${fmtDate(parseDT(spawned.due_date))}`:''}`);
   save(); closeDrawer(); render();
   return true;
 }
@@ -697,6 +736,7 @@ function exportCSV(){
     ['Smart date',x=>dateInputVal(effDue(x.t))],
     ['Start date',x=>dateInputVal(x.t.start_date)],
     ['Est. minutes',x=>x.t.estimated_minutes||''],
+    ['Repeat',    x=>REPEAT_LABEL[x.t.recurrence]||''],
     ['Tags',      x=>(x.t.tags||[]).join(', ')],
     ['Description',x=>x.t.description||''],
     ['Notes',     x=>x.t.notes||''],
