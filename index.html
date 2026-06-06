@@ -67,6 +67,9 @@
     --c:48px minmax(96px,140px) minmax(0,1fr) 132px 98px 84px 64px;}
   .thead{display:grid;grid-template-columns:var(--c);gap:12px;padding:2px 14px 4px;
     font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);}
+  .thead .th{cursor:pointer;user-select:none;white-space:nowrap;transition:color .12s;}
+  .thead .th:hover{color:var(--ink);}
+  .thead .th.on{color:var(--green);}
   .trow{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 12px;
     display:grid;grid-template-columns:var(--c);gap:12px;align-items:center;cursor:pointer;
     transition:border-color .12s,box-shadow .12s;box-shadow:var(--shadow);}
@@ -188,9 +191,12 @@
     <select class="ctl" id="sortBy">
       <option value="smart">Sort: Smart date</option>
       <option value="priority">Sort: Priority</option>
-      <option value="created">Sort: Newest</option>
+      <option value="status">Sort: Status</option>
+      <option value="start">Sort: Start date</option>
       <option value="client">Sort: Client</option>
       <option value="title">Sort: Title A–Z</option>
+      <option value="est">Sort: Est. time</option>
+      <option value="created">Sort: Newest</option>
     </select>
     <select class="ctl" id="tagFilter"><option value="">All tags</option></select>
     <div class="seg" id="viewSeg">
@@ -305,7 +311,9 @@ function prio(t){ const p=parseInt(t&&t.priority,10); return (p>=1&&p<=5)?p:5; }
 
 /* ---------- state ---------- */
 let doc = load();
-let ui = { client:"all", status:"active", tag:"", q:"", sort:"smart", view:"list", editingId:null };
+let ui = { client:"all", status:"active", tag:"", q:"", sort:"smart", dir:1, view:"list", editingId:null };
+// rank used when sorting by the Status column
+const STATUS_SORT_ORDER=['open','in_progress','blocked','staged','done','deferred'];
 
 /* ---------- persistence ---------- */
 function load(){
@@ -387,15 +395,20 @@ function visibleTasks(){
   if(ui.tag) list=list.filter(x=>(x.t.tags||[]).includes(ui.tag));
   if(ui.q){ const q=ui.q.toLowerCase();
     list=list.filter(x=>[x.t.title,x.t.description,x.t.notes,(x.t.tags||[]).join(' '),x.t.client].join(' ').toLowerCase().includes(q)); }
+  const rank=s=>{ const i=STATUS_SORT_ORDER.indexOf(s); return i<0?99:i; };
   const sorters={
     // smart date ascending (soonest first), no-date tasks sink to the bottom, then priority as tiebreak
     smart:(a,b)=> ((effDue(a.t)||Infinity)-(effDue(b.t)||Infinity)) || prio(a.t)-prio(b.t),
     priority:(a,b)=> prio(a.t)-prio(b.t) || ((effDue(a.t)||Infinity)-(effDue(b.t)||Infinity)),
+    status:(a,b)=> rank(a.t.status)-rank(b.t.status) || prio(a.t)-prio(b.t),
+    start:(a,b)=> ((parseDT(a.t.start_date)||Infinity)-(parseDT(b.t.start_date)||Infinity)) || prio(a.t)-prio(b.t),
+    est:(a,b)=> ((a.t.estimated_minutes||0)-(b.t.estimated_minutes||0)) || prio(a.t)-prio(b.t),
     created:(a,b)=> (parseDT(b.t.created_date)||0)-(parseDT(a.t.created_date)||0),
     client:(a,b)=> (a.t.client||'').localeCompare(b.t.client||'') || b.score-a.score,
     title:(a,b)=> (a.t.title||'').localeCompare(b.t.title||''),
   };
-  list.sort(sorters[ui.sort]||sorters.smart);
+  const cmp=sorters[ui.sort]||sorters.smart, dir=ui.dir||1;
+  list.sort((a,b)=> cmp(a,b)*dir);
   return list;
 }
 
@@ -432,6 +445,7 @@ function render(){
   list.forEach(x=>html.push(rowHTML(x,ref)));
   html.push('</div>');
   main.innerHTML=html.join('');
+  main.querySelectorAll('.thead .th').forEach(th=>th.addEventListener('click',()=>setSort(th.dataset.sort)));
   main.querySelectorAll('.trow').forEach(r=>{
     r.addEventListener('click',e=>{ if(e.target.closest('.stsel')||e.target.closest('.prsel'))return; openDrawer(r.dataset.id); });
   });
@@ -444,10 +458,19 @@ function render(){
     sel.addEventListener('click',e=>e.stopPropagation());
   });
 }
+// [sort-key, label] — same order as the row columns so headers line up over them
+const HCOLS=[['priority','Prio'],['client','Client'],['title','Task'],['status','Status'],['smart','Smart&nbsp;date'],['start','Start'],['est','Est']];
 function gridHeader(){
-  return `<div class="thead">
-    <div>Prio</div><div>Client</div><div>Task</div><div>Status</div><div>Smart&nbsp;date</div><div>Start</div><div>Est</div>
-  </div>`;
+  return `<div class="thead">`+HCOLS.map(([k,l])=>{
+    const on=ui.sort===k, arr=on?(ui.dir<0?' ▼':' ▲'):'';
+    return `<div class="th${on?' on':''}" data-sort="${k}" title="Sort by ${l.replace('&nbsp;',' ')}">${l}${arr}</div>`;
+  }).join('')+`</div>`;
+}
+function setSort(k){
+  if(ui.sort===k) ui.dir=-(ui.dir||1);   // re-click same column → flip direction
+  else { ui.sort=k; ui.dir=1; }
+  const sel=document.getElementById('sortBy'); if(sel && [...sel.options].some(o=>o.value===k)) sel.value=k;
+  render();
 }
 function rowHTML(x,ref){
   const t=x.t, w=whenInfo(t,ref), cc=clientColor(t.client);
@@ -833,7 +856,7 @@ document.getElementById('fileInput').onchange=e=>{ if(e.target.files[0]) importJ
 document.getElementById('drawerClose').onclick=closeDrawer;
 document.getElementById('scrim').onclick=closeDrawer;
 document.getElementById('search').addEventListener('input',e=>{ ui.q=e.target.value; render(); });
-document.getElementById('sortBy').addEventListener('change',e=>{ ui.sort=e.target.value; render(); });
+document.getElementById('sortBy').addEventListener('change',e=>{ ui.sort=e.target.value; ui.dir=1; render(); });
 document.getElementById('viewSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
   ui.view=b.dataset.v; document.getElementById('viewSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); render(); });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeDrawer();
