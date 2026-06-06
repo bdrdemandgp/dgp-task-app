@@ -276,10 +276,11 @@
    Scoring: ported from prioritize.py + weights.json
    ============================================================ */
 const SEED = {
-  "_schema_version": 3,
+  "_schema_version": 4,
   "_last_updated": null,
   "_notes": "Hosted shell — no data embedded. Connect GitHub Sync to load tasks.",
-  "tasks": []
+  "tasks": [],
+  "clients": []
 };
 let WEIGHTS = {
   "_notes": "Numeric weights used by prioritize.py. Edit these values to tune scoring. See prioritize.md for what each rule means.",
@@ -297,13 +298,19 @@ const LS_KEY = "dgp_tasks_v1";
 /* Clients are NOT hardcoded — derived from the data so the hosted shell carries
    no client names. New clients can be typed in the task drawer. */
 const EXTRA_CLIENTS_KEY = "dgp_extra_clients";
+// Client roster lives in the DATA (doc.clients) so it syncs across devices via GitHub.
+// Union with clients actually used in tasks (+ legacy per-device localStorage) so nothing is ever lost.
 function clientList(){
-  const s=new Set(doc.tasks.map(t=>t.client).filter(Boolean));
+  const s=new Set();
+  if(Array.isArray(doc.clients)) doc.clients.forEach(c=>c&&s.add(c));
+  doc.tasks.forEach(t=>{ if(t.client) s.add(t.client); });
   try{ (JSON.parse(localStorage.getItem(EXTRA_CLIENTS_KEY)||"[]")).forEach(c=>s.add(c)); }catch(e){}
   return [...s].sort((a,b)=>a.localeCompare(b));
 }
-function rememberClient(name){ if(!name) return; const s=new Set(clientList()); s.add(name);
-  localStorage.setItem(EXTRA_CLIENTS_KEY, JSON.stringify([...s])); }
+function rememberClient(name){ if(!name) return;
+  if(!Array.isArray(doc.clients)) doc.clients=[];
+  if(!doc.clients.includes(name)){ doc.clients.push(name); doc.clients.sort((a,b)=>a.localeCompare(b)); save(); } // persist + sync
+}
 // Client picker: a dropdown of known clients (keeps names standardized) + an "add new" escape hatch.
 function clientOptionsInner(selected){
   return clientList().map(c=>`<option value="${esc(c)}" ${c===selected?'selected':''}>${esc(c)}</option>`).join('')
