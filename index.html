@@ -83,6 +83,7 @@
   .c-title .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px;align-items:center;}
   .rep{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:#eef2ff;color:#4338ca;}
   .wt{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#fff;}
+  .disp{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#fff;}
   .cf{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:#dcfce7;color:#166534;}
   .celld{font-size:12px;color:var(--ink);font-weight:500;}
   .cmuted{color:var(--muted);font-size:11px;}
@@ -208,7 +209,8 @@
       <option value="est">Sort: Est. time</option>
       <option value="created">Sort: Newest</option>
     </select>
-    <select class="ctl" id="workTypeFilter"><option value="all">All types</option><option value="strategic">Strategic</option><option value="tactical">Tactical</option><option value="creative">Creative</option></select>
+    <select class="ctl" id="workTypeFilter"><option value="all">All types</option><option value="strategic">Strategic</option><option value="tactical">Tactical</option></select>
+    <select class="ctl" id="dispFilter"><option value="all">All dispositions</option></select>
     <select class="ctl" id="tagFilter"><option value="">All tags</option></select>
     <div class="seg" id="viewSeg">
       <button data-v="list" class="on">☰ List</button>
@@ -292,7 +294,7 @@ let WEIGHTS = {
   "big_task_minutes_threshold": 120,
   "max_score_cap": 100
 };
-const BUILD_DATE = "2026-06-06-shell";
+const BUILD_DATE = "2026-06-07-shell";
 const LS_KEY = "dgp_tasks_v1";
 
 /* Clients are NOT hardcoded — derived from the data so the hosted shell carries
@@ -320,6 +322,14 @@ function clientSelectHTML(selected){
   const blank = selected ? '' : `<option value="" selected disabled>— select client —</option>`;
   return `<select id="f_client">${blank}${clientOptionsInner(selected)}</select>`;
 }
+function dispositionOptions(sel){
+  const opt=arr=>arr.map(d=>`<option value="${esc(d)}" ${d===sel?'selected':''}>${esc(d)}</option>`).join('');
+  return `<optgroup label="Recommended core">${opt(DISPOSITIONS_CORE)}</optgroup><optgroup label="Optional">${opt(DISPOSITIONS_OPT)}</optgroup>`;
+}
+function wireWorkType(){ // show Disposition only for tactical tasks
+  const wt=document.getElementById('f_worktype'); if(!wt) return;
+  wt.addEventListener('change',()=>{ const w=document.getElementById('dispWrap'); if(w) w.style.display=wt.value==='tactical'?'':'none'; });
+}
 function wireClientSelect(){
   const sel=document.getElementById('f_client'); if(!sel) return;
   sel._prev=sel.value;
@@ -340,10 +350,16 @@ function clientWeightKey(name){ return 'client_'+name.replace(/[^a-z0-9 ]/gi,'')
 const STATUSES = ["open","in_progress","blocked","staged","done","deferred"];
 // recurrence: closing a task with one of these auto-creates the next occurrence
 const REPEAT_LABEL = {weekly:"Weekly",biweekly:"Every 2 weeks",monthly:"Monthly",quarterly:"Quarterly"};
-// work_type: structured classification (was the strategic/tactical/creative -work tags)
-const WORK_TYPES = ["strategic","tactical","creative"];
-const WORK_TYPE_LABEL = {strategic:"Strategic",tactical:"Tactical",creative:"Creative"};
-const WORK_TYPE_COLOR = {strategic:"#7c3aed",tactical:"#0369a1",creative:"#be185d"};
+// work_type: strategic (Brian's unique value) vs tactical (execution — includes what used to be "creative")
+const WORK_TYPES = ["strategic","tactical"];
+const WORK_TYPE_LABEL = {strategic:"Strategic",tactical:"Tactical"};
+const WORK_TYPE_COLOR = {strategic:"#7c3aed",tactical:"#0369a1"};
+// disposition: for TACTICAL tasks only — how the execution work should be resourced/routed
+const DISPOSITIONS_CORE = ["Potential Automation","Execution Partner","Creative Resource","Existing Vendor","Livewire Internal","Keep (Brian)"];
+const DISPOSITIONS_OPT  = ["Admin / VA","Drop / Out of Scope"];
+const DISPOSITIONS = [...DISPOSITIONS_CORE, ...DISPOSITIONS_OPT];
+const DISPOSITION_COLOR = {"Potential Automation":"#0891b2","Execution Partner":"#7c3aed","Creative Resource":"#be185d",
+  "Existing Vendor":"#b45309","Livewire Internal":"#0369a1","Keep (Brian)":"#15803d","Admin / VA":"#6b7280","Drop / Out of Scope":"#9ca3af"};
 const STATUS_LABEL = {open:"Open",in_progress:"In progress",blocked:"Blocked",staged:"Staged",done:"Done",deferred:"Deferred"};
 const STATUS_COLOR = {open:"#64748b",in_progress:"#1A5FAB",blocked:"#d97706",staged:"#8b5cf6",done:"#00B67E",deferred:"#9ca3af"};
 const BOARD_COLS = ["open","in_progress","blocked","staged","done"];
@@ -356,7 +372,7 @@ function prio(t){ const p=parseInt(t&&t.priority,10); return (p>=1&&p<=5)?p:5; }
 
 /* ---------- state ---------- */
 let doc = load();
-let ui = { client:"all", status:"active", tag:"", worktype:"all", q:"", sort:"smart", dir:1, view:"list", editingId:null };
+let ui = { client:"all", status:"active", tag:"", worktype:"all", disposition:"all", q:"", sort:"smart", dir:1, view:"list", editingId:null };
 // rank used when sorting by the Status column
 const STATUS_SORT_ORDER=['open','in_progress','blocked','staged','done','deferred'];
 
@@ -451,6 +467,7 @@ function visibleTasks(){
   else if(ui.status!=='all') list=list.filter(x=>x.t.status===ui.status);
   if(ui.tag) list=list.filter(x=>(x.t.tags||[]).includes(ui.tag));
   if(ui.worktype&&ui.worktype!=='all') list=list.filter(x=>x.t.work_type===ui.worktype);
+  if(ui.disposition&&ui.disposition!=='all') list=list.filter(x=>x.t.disposition===ui.disposition);
   if(ui.q){ const q=ui.q.toLowerCase();
     list=list.filter(x=>[x.t.title,x.t.description,x.t.notes,(x.t.tags||[]).join(' '),x.t.client].join(' ').toLowerCase().includes(q)); }
   const rank=s=>{ const i=STATUS_SORT_ORDER.indexOf(s); return i<0?99:i; };
@@ -540,8 +557,9 @@ function rowHTML(x,ref){
   const start=parseDT(t.start_date);
   const rep=t.recurrence&&REPEAT_LABEL[t.recurrence]?`<span class="rep">🔁 ${REPEAT_LABEL[t.recurrence]}</span>`:'';
   const wt=t.work_type&&WORK_TYPE_LABEL[t.work_type]?`<span class="wt" style="background:${WORK_TYPE_COLOR[t.work_type]}">${WORK_TYPE_LABEL[t.work_type]}</span>`:'';
+  const disp=t.work_type==='tactical'&&t.disposition?`<span class="disp" style="background:${DISPOSITION_COLOR[t.disposition]||'#6b7280'}">${esc(t.disposition)}</span>`:'';
   const cf=t.client_facing?`<span class="cf">client-facing</span>`:'';
-  const metas=`${wt}${cf}${flagPills(x.flags)}${rep}${tags}`;
+  const metas=`${wt}${disp}${cf}${flagPills(x.flags)}${rep}${tags}`;
   return `<div class="trow" data-id="${t.id}">
     <div class="c-prio">${prsel}</div>
     <div class="c-cli"><span class="ctag" style="background:${cc}">${esc(t.client||'—')}</span></div>
@@ -680,7 +698,7 @@ function newId(){
 function blankTask(){
   return {id:newId(),title:'',description:'',client:ui.client!=='all'?ui.client:(clientList()[0]||''),due_date:null,
     smart_date:null,start_date:null,estimated_minutes:30,status:'open',priority:5,recurrence:null,
-    work_type:'tactical',client_facing:false,
+    work_type:'tactical',disposition:null,client_facing:false,
     created_date:nowISO(),completed_date:null,source:'manual',depends_on:[],tags:[],notes:''};
 }
 
@@ -711,9 +729,10 @@ function openDrawer(id){
     <div class="grid2">
       <div class="fld"><label>Work type</label>
         <select id="f_worktype">${WORK_TYPES.map(w=>`<option value="${w}" ${(t.work_type||'tactical')===w?'selected':''}>${WORK_TYPE_LABEL[w]}</option>`).join('')}</select></div>
-      <div class="fld"><label>Client-facing</label>
-        <label class="chk"><input type="checkbox" id="f_clientfacing" ${t.client_facing?'checked':''}> Deliverable a client sees</label></div>
+      <div class="fld" id="dispWrap" style="${(t.work_type||'tactical')==='tactical'?'':'display:none'}"><label>Disposition</label>
+        <select id="f_disposition"><option value="">— select —</option>${dispositionOptions(t.disposition)}</select></div>
     </div>
+    <div class="fld"><label class="chk"><input type="checkbox" id="f_clientfacing" ${t.client_facing?'checked':''}> Client-facing — a deliverable the client sees</label></div>
     <div class="fld"><label>Tags (comma-separated)</label><input id="f_tags" value="${esc((t.tags||[]).join(', '))}" placeholder="video-wall, campaign, permit-miner"></div>
     <div class="fld"><label>Description</label><textarea id="f_desc" placeholder="Short summary">${esc(t.description)}</textarea></div>
     <div class="fld"><label>Notes / log</label><textarea id="f_notes" style="min-height:90px" placeholder="Running notes…">${esc(t.notes)}</textarea></div>
@@ -734,7 +753,7 @@ function openDrawer(id){
   if(foot.querySelector('#d_done')) foot.querySelector('#d_done').onclick=()=>{ collectDraft(); ui._draft.status='done'; commitDraft(); };
   if(foot.querySelector('#d_reopen')) foot.querySelector('#d_reopen').onclick=()=>{ collectDraft(); ui._draft.status='open'; commitDraft(); };
   if(foot.querySelector('#d_del')) foot.querySelector('#d_del').onclick=()=>delTask(t.id);
-  wireClientSelect();
+  wireClientSelect(); wireWorkType();
   document.getElementById('scrim').classList.add('open');
   document.getElementById('drawer').classList.add('open');
   setTimeout(()=>document.getElementById('f_title').focus(),150);
@@ -751,6 +770,7 @@ function collectDraft(){
   d.estimated_minutes=g('f_est').value?parseInt(g('f_est').value,10):null;
   d.recurrence=g('f_repeat').value||null;
   d.work_type=g('f_worktype').value||'tactical';
+  d.disposition = d.work_type==='tactical' ? (g('f_disposition').value||null) : null;
   d.client_facing=g('f_clientfacing').checked;
   d.tags=g('f_tags').value.split(',').map(s=>s.trim()).filter(Boolean);
   d.description=g('f_desc').value.trim();
@@ -813,6 +833,7 @@ function exportCSV(){
     ['Client',    x=>x.t.client||''],
     ['Status',    x=>STATUS_LABEL[x.t.status]||x.t.status||''],
     ['Work type', x=>WORK_TYPE_LABEL[x.t.work_type]||''],
+    ['Disposition', x=>x.t.disposition||''],
     ['Client-facing', x=>x.t.client_facing?'yes':'no'],
     ['Priority',  x=>prio(x.t)],
     ['Priority label', x=>PRIO_LABEL[prio(x.t)]||''],
@@ -998,6 +1019,10 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeDrawer();
   sel.addEventListener('change',e=>{ ui.tag=e.target.value; render(); });
 })();
 document.getElementById('workTypeFilter').addEventListener('change',e=>{ ui.worktype=e.target.value; render(); });
+(function(){ const sel=document.getElementById('dispFilter');
+  DISPOSITIONS.forEach(d=>{ const o=document.createElement('option'); o.value=d; o.textContent=d; sel.appendChild(o); });
+  sel.addEventListener('change',e=>{ ui.disposition=e.target.value; render(); });
+})();
 
 document.getElementById('savestate').textContent = localStorage.getItem(LS_KEY)?'✓ loaded saved copy':'starting from seed';
 render();
