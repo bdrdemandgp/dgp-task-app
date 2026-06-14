@@ -93,6 +93,8 @@
   .flag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;}
   .fl-overdue{background:#fde8e8;color:var(--red);} .fl-stale{background:#fff4e0;color:var(--amber);}
   .fl-block{background:#ede9fe;color:#6d28d9;} .fl-time{background:#e0f2fe;color:#0369a1;}
+  .ns{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:#eef2ff;color:#3730a3;}
+  .ns.mine{background:#fde68a;color:#92400e;}
   .when{font-size:12px;font-weight:600;} .when.over{color:var(--red);} .when.soon{color:var(--amber);}
   .est{font-size:11px;color:var(--muted);white-space:nowrap;}
   .stsel,.prsel{font-size:11px;font-weight:700;border-radius:6px;padding:3px 7px;border:1px solid transparent;
@@ -212,6 +214,7 @@
     <select class="ctl" id="workTypeFilter"><option value="all">All types</option><option value="strategic">Strategic</option><option value="tactical">Tactical</option></select>
     <select class="ctl" id="dispFilter"><option value="all">All dispositions</option></select>
     <select class="ctl" id="tagFilter"><option value="">All tags</option></select>
+    <select class="ctl" id="waitFilter"><option value="all">Waiting on: all</option></select>
     <div class="seg" id="viewSeg">
       <button data-v="list" class="on">☰ List</button>
       <button data-v="board">▦ Board</button>
@@ -278,7 +281,7 @@
    Scoring: ported from prioritize.py + weights.json
    ============================================================ */
 const SEED = {
-  "_schema_version": 4,
+  "_schema_version": 5,
   "_last_updated": null,
   "_notes": "Hosted shell — no data embedded. Connect GitHub Sync to load tasks.",
   "tasks": [],
@@ -294,7 +297,7 @@ let WEIGHTS = {
   "big_task_minutes_threshold": 120,
   "max_score_cap": 100
 };
-const BUILD_DATE = "2026-06-07-shell";
+const BUILD_DATE = "2026-06-14-shell";
 const LS_KEY = "dgp_tasks_v1";
 
 /* Clients are NOT hardcoded — derived from the data so the hosted shell carries
@@ -370,9 +373,19 @@ const PRIO_COLOR = {1:"#dc2626",2:"#ea580c",3:"#d9a406",4:"#64748b",5:"#9ca3af"}
 const PRIO_LABEL = {1:"Highest",2:"High",3:"Medium",4:"Low",5:"Lowest"};
 function prio(t){ const p=parseInt(t&&t.priority,10); return (p>=1&&p<=5)?p:5; }
 
+/* next_step / "waiting on" — whose court the ball is in. Base suggestions stay generic so no
+   colleague names get baked into the public shell; specific names come from the (private) data. */
+const NEXT_STEP_BASE = ["Brian","Client","Vendor"];
+function nextStepOptions(){
+  const s=new Set(NEXT_STEP_BASE);
+  doc.tasks.forEach(t=>{ const n=(t.next_step||'').trim(); if(n) s.add(n); });
+  return [...s].sort((a,b)=>a.localeCompare(b));
+}
+function isMine(ns){ const n=(ns||'').trim().toLowerCase(); return n==='brian'||n==='me'||n==='me (brian)'; }
+
 /* ---------- state ---------- */
 let doc = load();
-let ui = { client:"all", status:"active", tag:"", worktype:"all", disposition:"all", q:"", sort:"smart", dir:1, view:"list", editingId:null };
+let ui = { client:"all", status:"active", tag:"", worktype:"all", disposition:"all", wait:"all", q:"", sort:"smart", dir:1, view:"list", editingId:null };
 // rank used when sorting by the Status column
 const STATUS_SORT_ORDER=['open','in_progress','blocked','staged','done','deferred'];
 
@@ -468,8 +481,13 @@ function visibleTasks(){
   if(ui.tag) list=list.filter(x=>(x.t.tags||[]).includes(ui.tag));
   if(ui.worktype&&ui.worktype!=='all') list=list.filter(x=>x.t.work_type===ui.worktype);
   if(ui.disposition&&ui.disposition!=='all') list=list.filter(x=>x.t.disposition===ui.disposition);
+  if(ui.wait&&ui.wait!=='all'){
+    if(ui.wait==='__mine__') list=list.filter(x=>isMine(x.t.next_step));
+    else if(ui.wait==='__others__') list=list.filter(x=>{const n=(x.t.next_step||'').trim();return n&&!isMine(n);});
+    else list=list.filter(x=>(x.t.next_step||'')===ui.wait);
+  }
   if(ui.q){ const q=ui.q.toLowerCase();
-    list=list.filter(x=>[x.t.title,x.t.description,x.t.notes,(x.t.tags||[]).join(' '),x.t.client].join(' ').toLowerCase().includes(q)); }
+    list=list.filter(x=>[x.t.title,x.t.notes,x.t.next_step,(x.t.tags||[]).join(' '),x.t.client].join(' ').toLowerCase().includes(q)); }
   const rank=s=>{ const i=STATUS_SORT_ORDER.indexOf(s); return i<0?99:i; };
   const sorters={
     // smart date ascending (soonest first), no-date tasks sink to the bottom, then priority as tiebreak
@@ -559,7 +577,8 @@ function rowHTML(x,ref){
   const wt=t.work_type&&WORK_TYPE_LABEL[t.work_type]?`<span class="wt" style="background:${WORK_TYPE_COLOR[t.work_type]}">${WORK_TYPE_LABEL[t.work_type]}</span>`:'';
   const disp=t.work_type==='tactical'&&t.disposition?`<span class="disp" style="background:${DISPOSITION_COLOR[t.disposition]||'#6b7280'}">${esc(t.disposition)}</span>`:'';
   const cf=t.client_facing?`<span class="cf">client-facing</span>`:'';
-  const metas=`${wt}${disp}${cf}${flagPills(x.flags)}${rep}${tags}`;
+  const ns=t.next_step?`<span class="ns${isMine(t.next_step)?' mine':''}">⏳ ${esc(t.next_step)}</span>`:'';
+  const metas=`${wt}${disp}${cf}${ns}${flagPills(x.flags)}${rep}${tags}`;
   return `<div class="trow" data-id="${t.id}">
     <div class="c-prio">${prsel}</div>
     <div class="c-cli"><span class="ctag" style="background:${cc}">${esc(t.client||'—')}</span></div>
@@ -587,7 +606,7 @@ function renderBoard(list,ref){
       card.style.borderLeftColor=cc;
       card.innerHTML=`<div class="ct">${esc(t.title)}</div><div class="cm">
         <span class="ctag" style="background:${cc};font-size:10px;padding:2px 7px">${esc(t.client||'—')}</span>
-        ${t.status!=='done'?`<span class="tag" style="background:${PRIO_COLOR[prio(t)]};color:#fff">P${prio(t)}</span>`:''}${flagPills(x.flags)}</div>`;
+        ${t.status!=='done'?`<span class="tag" style="background:${PRIO_COLOR[prio(t)]};color:#fff">P${prio(t)}</span>`:''}${t.next_step?`<span class="ns${isMine(t.next_step)?' mine':''}">⏳ ${esc(t.next_step)}</span>`:''}${flagPills(x.flags)}</div>`;
       card.addEventListener('click',()=>openDrawer(t.id));
       card.addEventListener('dragstart',e=>{ e.dataTransfer.setData('text/plain',t.id); card.classList.add('dragging'); });
       card.addEventListener('dragend',()=>card.classList.remove('dragging'));
@@ -679,7 +698,7 @@ function spawnRecurrence(task){
        && x.title===task.title && (x.client||'')===(task.client||''))) return null;
   const n=JSON.parse(JSON.stringify(task));
   n.id=newId(); n.status='open'; n.completed_date=null; n.created_date=nowISO();
-  n.depends_on=[]; n.notes=''; n.source='recurring';
+  n.depends_on=[]; n.notes=''; n.next_step=''; n.source='recurring';
   n.due_date=advanceISO(task.due_date||task.smart_date, task.recurrence); n.smart_date=null;
   n.start_date=task.start_date?advanceISO(task.start_date, task.recurrence):null;
   doc.tasks.unshift(n);
@@ -696,9 +715,9 @@ function newId(){
   let id=base,i=1; while(getTask(id)){ id=base+'-'+(i++); } return id;
 }
 function blankTask(){
-  return {id:newId(),title:'',description:'',client:ui.client!=='all'?ui.client:(clientList()[0]||''),due_date:null,
+  return {id:newId(),title:'',client:ui.client!=='all'?ui.client:(clientList()[0]||''),due_date:null,
     smart_date:null,start_date:null,estimated_minutes:30,status:'open',priority:5,recurrence:null,
-    work_type:'tactical',disposition:null,client_facing:false,
+    work_type:'tactical',disposition:null,client_facing:false,next_step:'',
     created_date:nowISO(),completed_date:null,source:'manual',depends_on:[],tags:[],notes:''};
 }
 
@@ -715,6 +734,9 @@ function openDrawer(id){
       <div class="fld"><label>Client</label>${clientSelectHTML(t.client||'')}</div>
       <div class="fld"><label>Status</label><select id="f_status">${STATUSES.map(s=>`<option value="${s}" ${s===t.status?'selected':''}>${STATUS_LABEL[s]}</option>`).join('')}</select></div>
     </div>
+    <div class="fld"><label>Waiting on / Next step</label>
+      <input id="f_nextstep" list="nextStepOpts" value="${esc(t.next_step||'')}" placeholder="Brian (on me), Client, Vendor, Henry…">
+      <datalist id="nextStepOpts">${nextStepOptions().map(o=>`<option value="${esc(o)}">`).join('')}</datalist></div>
     <div class="fld"><label>Priority &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">(1 = highest · 5 = lowest)</span></label>
       <select id="f_prio">${[1,2,3,4,5].map(n=>`<option value="${n}" ${prio(t)===n?'selected':''}>${n} — ${PRIO_LABEL[n]}${n===5?' (default)':''}</option>`).join('')}</select></div>
     <div class="grid2">
@@ -734,8 +756,12 @@ function openDrawer(id){
     </div>
     <div class="fld"><label class="chk"><input type="checkbox" id="f_clientfacing" ${t.client_facing?'checked':''}> Client-facing — a deliverable the client sees</label></div>
     <div class="fld"><label>Tags (comma-separated)</label><input id="f_tags" value="${esc((t.tags||[]).join(', '))}" placeholder="video-wall, campaign, permit-miner"></div>
-    <div class="fld"><label>Description</label><textarea id="f_desc" placeholder="Short summary">${esc(t.description)}</textarea></div>
-    <div class="fld"><label>Notes / log</label><textarea id="f_notes" style="min-height:90px" placeholder="Running notes…">${esc(t.notes)}</textarea></div>
+    <div class="fld"><label>Notes / Log &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">(newest on top)</span></label>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="f_noteadd" placeholder="Add a note — timestamped, goes to top" style="flex:1">
+        <button type="button" class="btn ghost" id="f_notebtn" style="padding:9px 12px;white-space:nowrap">＋ Note</button>
+      </div>
+      <textarea id="f_notes" style="min-height:220px" placeholder="Running log…">${esc(t.notes)}</textarea></div>
     <div style="font-size:11px;color:var(--muted)">ID ${t.id} · source ${esc(t.source||'manual')}${t.completed_date?' · done '+fmtDate(parseDT(t.completed_date)):''}</div>
   `;
   const foot=document.getElementById('drawerFoot');
@@ -753,10 +779,28 @@ function openDrawer(id){
   if(foot.querySelector('#d_done')) foot.querySelector('#d_done').onclick=()=>{ collectDraft(); ui._draft.status='done'; commitDraft(); };
   if(foot.querySelector('#d_reopen')) foot.querySelector('#d_reopen').onclick=()=>{ collectDraft(); ui._draft.status='open'; commitDraft(); };
   if(foot.querySelector('#d_del')) foot.querySelector('#d_del').onclick=()=>delTask(t.id);
-  wireClientSelect(); wireWorkType();
+  wireClientSelect(); wireWorkType(); wireQuickNote();
   document.getElementById('scrim').classList.add('open');
   document.getElementById('drawer').classList.add('open');
   setTimeout(()=>document.getElementById('f_title').focus(),150);
+}
+function logStamp(){
+  const d=new Date();
+  const date=dateInputVal(toEasternISO(d));
+  const time=d.toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit'});
+  return `[${date} ${time}]`;
+}
+function addQuickNote(){
+  const inp=document.getElementById('f_noteadd'), ta=document.getElementById('f_notes');
+  if(!inp||!ta) return;
+  const v=(inp.value||'').trim(); if(!v) return;
+  ta.value = `${logStamp()} ${v}` + (ta.value.trim()? '\n\n'+ta.value : '');
+  inp.value=''; ta.scrollTop=0;
+}
+function wireQuickNote(){
+  const b=document.getElementById('f_notebtn'), inp=document.getElementById('f_noteadd');
+  if(b) b.onclick=addQuickNote;
+  if(inp) inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); addQuickNote(); } });
 }
 function collectDraft(){
   const g=id=>document.getElementById(id);
@@ -773,7 +817,7 @@ function collectDraft(){
   d.disposition = d.work_type==='tactical' ? (g('f_disposition').value||null) : null;
   d.client_facing=g('f_clientfacing').checked;
   d.tags=g('f_tags').value.split(',').map(s=>s.trim()).filter(Boolean);
-  d.description=g('f_desc').value.trim();
+  d.next_step=(g('f_nextstep').value||'').trim();
   d.notes=g('f_notes').value;
 }
 function saveDrawer(){ collectDraft(); commitDraft(); }
@@ -832,6 +876,7 @@ function exportCSV(){
     ['Title',     x=>x.t.title],
     ['Client',    x=>x.t.client||''],
     ['Status',    x=>STATUS_LABEL[x.t.status]||x.t.status||''],
+    ['Waiting on',x=>x.t.next_step||''],
     ['Work type', x=>WORK_TYPE_LABEL[x.t.work_type]||''],
     ['Disposition', x=>x.t.disposition||''],
     ['Client-facing', x=>x.t.client_facing?'yes':'no'],
@@ -844,8 +889,7 @@ function exportCSV(){
     ['Est. minutes',x=>x.t.estimated_minutes||''],
     ['Repeat',    x=>REPEAT_LABEL[x.t.recurrence]||''],
     ['Tags',      x=>(x.t.tags||[]).join(', ')],
-    ['Description',x=>x.t.description||''],
-    ['Notes',     x=>x.t.notes||''],
+    ['Notes / Log', x=>x.t.notes||''],
     ['Created',   x=>dateInputVal(x.t.created_date)],
     ['Completed', x=>dateInputVal(x.t.completed_date)],
     ['Source',    x=>x.t.source||'manual'],
@@ -937,7 +981,7 @@ async function pull(silent){
     doc=res.doc; SYNC.sha=res.sha; SYNC.lastPull=Date.now(); SYNC.enabled=true; saveCfg();
     localStorage.setItem(LS_KEY, JSON.stringify(doc));
     await pullWeights();  // refresh scoring weights from the private repo
-    rebuildTagFilter(); render(); setSyncUI('on','Synced'); if(!silent) toast('Pulled latest from GitHub');
+    rebuildTagFilter(); rebuildWaitFilter(); render(); setSyncUI('on','Synced'); if(!silent) toast('Pulled latest from GitHub');
   }catch(e){ setSyncUI('err','Sync error'); if(!silent) toast('Pull failed: '+e.message); console.error(e); }
 }
 let syncTimer=null, pushing=false;
@@ -954,7 +998,7 @@ async function push(){
       if(!remote.missing){
         const overwrite=confirm("Another device changed the tasks since this browser last synced.\n\nOK = keep THIS browser's version (overwrite remote)\nCancel = load the remote version (discard this browser's unsynced edits)");
         if(overwrite){ res=await ghPut("Update tasks via DGP Task Manager (resolve conflict)", remote.sha); }
-        else { doc=remote.doc; SYNC.sha=remote.sha; localStorage.setItem(LS_KEY,JSON.stringify(doc)); rebuildTagFilter(); render(); setSyncUI('on','Synced'); toast('Loaded remote version'); pushing=false; return; }
+        else { doc=remote.doc; SYNC.sha=remote.sha; localStorage.setItem(LS_KEY,JSON.stringify(doc)); rebuildTagFilter(); rebuildWaitFilter(); render(); setSyncUI('on','Synced'); toast('Loaded remote version'); pushing=false; return; }
       } else { res=await ghPut("Create tasks via DGP Task Manager", null); }
     }
     if(res&&res.sha){ SYNC.sha=res.sha; SYNC.lastPush=Date.now(); saveCfg(); setSyncUI('on','Synced'); }
@@ -987,6 +1031,14 @@ document.getElementById('s_enable').onclick=async()=>{ readSyncForm(); SYNC.enab
 document.getElementById('s_push').onclick=async()=>{ readSyncForm(); SYNC.enabled=true; saveCfg(); document.getElementById('syncModal').classList.remove('open'); await push(); toast('Pushed local copy to GitHub'); };
 document.getElementById('s_disable').onclick=()=>{ SYNC.enabled=false; saveCfg(); localStorage.removeItem(GH_TOK_KEY); setSyncUI('','Local only'); document.getElementById('syncModal').classList.remove('open'); toast('Disconnected — back to local-only'); };
 
+function rebuildWaitFilter(){
+  const sel=document.getElementById('waitFilter'); if(!sel) return;
+  const cur=ui.wait||'all';
+  const opts=['<option value="all">Waiting on: all</option>','<option value="__mine__">⏳ On me (Brian)</option>','<option value="__others__">Waiting on others</option>'];
+  nextStepOptions().forEach(v=>opts.push(`<option value="${esc(v)}">${esc(v)}</option>`));
+  sel.innerHTML=opts.join('');
+  if([...sel.options].some(o=>o.value===cur)) sel.value=cur; else { sel.value='all'; ui.wait='all'; }
+}
 function rebuildTagFilter(){
   const sel=document.getElementById('tagFilter'); const cur=sel.value;
   const tags={}; doc.tasks.forEach(t=>(t.tags||[]).forEach(g=>tags[g]=(tags[g]||0)+1));
@@ -1022,6 +1074,10 @@ document.getElementById('workTypeFilter').addEventListener('change',e=>{ ui.work
 (function(){ const sel=document.getElementById('dispFilter');
   DISPOSITIONS.forEach(d=>{ const o=document.createElement('option'); o.value=d; o.textContent=d; sel.appendChild(o); });
   sel.addEventListener('change',e=>{ ui.disposition=e.target.value; render(); });
+})();
+(function(){ rebuildWaitFilter();
+  const sel=document.getElementById('waitFilter');
+  if(sel) sel.addEventListener('change',e=>{ ui.wait=e.target.value; render(); });
 })();
 
 document.getElementById('savestate').textContent = localStorage.getItem(LS_KEY)?'✓ loaded saved copy':'starting from seed';
