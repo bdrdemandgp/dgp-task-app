@@ -211,7 +211,7 @@
       <option value="est">Sort: Est. time</option>
       <option value="created">Sort: Newest</option>
     </select>
-    <select class="ctl" id="workTypeFilter"><option value="all">All types</option><option value="strategic">Strategic</option><option value="tactical">Tactical</option></select>
+    <select class="ctl" id="workTypeFilter"><option value="all">All types</option><option value="strategic">Strategic</option><option value="research">Research</option><option value="tactical">Tactical</option></select>
     <select class="ctl" id="dispFilter"><option value="all">All dispositions</option></select>
     <select class="ctl" id="tagFilter"><option value="">All tags</option></select>
     <select class="ctl" id="waitFilter"><option value="all">Waiting on: all</option></select>
@@ -297,7 +297,7 @@ let WEIGHTS = {
   "big_task_minutes_threshold": 120,
   "max_score_cap": 100
 };
-const BUILD_DATE = "2026-06-14-shell";
+const BUILD_DATE = "2026-06-17-shell";
 const LS_KEY = "dgp_tasks_v1";
 
 /* Clients are NOT hardcoded — derived from the data so the hosted shell carries
@@ -353,10 +353,10 @@ function clientWeightKey(name){ return 'client_'+name.replace(/[^a-z0-9 ]/gi,'')
 const STATUSES = ["open","in_progress","blocked","staged","done","deferred"];
 // recurrence: closing a task with one of these auto-creates the next occurrence
 const REPEAT_LABEL = {weekly:"Weekly",biweekly:"Every 2 weeks",monthly:"Monthly",quarterly:"Quarterly"};
-// work_type: strategic (Brian's unique value) vs tactical (execution — includes what used to be "creative")
-const WORK_TYPES = ["strategic","tactical"];
-const WORK_TYPE_LABEL = {strategic:"Strategic",tactical:"Tactical"};
-const WORK_TYPE_COLOR = {strategic:"#7c3aed",tactical:"#0369a1"};
+// work_type: strategic (Brian's unique value) | research (look into a client ask + put together a response) | tactical (execution — includes what used to be "creative")
+const WORK_TYPES = ["strategic","research","tactical"];
+const WORK_TYPE_LABEL = {strategic:"Strategic",research:"Research",tactical:"Tactical"};
+const WORK_TYPE_COLOR = {strategic:"#7c3aed",research:"#0d9488",tactical:"#0369a1"};
 // disposition: for TACTICAL tasks only — how the execution work should be resourced/routed
 const DISPOSITIONS_CORE = ["Potential Automation","Execution Partner","Creative Resource","Existing Vendor","Client Internal","Keep (Brian)"];
 const DISPOSITIONS_OPT  = ["Admin / VA","Drop / Out of Scope"];
