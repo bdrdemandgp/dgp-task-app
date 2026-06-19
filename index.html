@@ -67,9 +67,11 @@
   .group-h .n{background:var(--line);color:var(--muted);border-radius:10px;padding:1px 8px;font-size:10.5px;}
   /* shared column template → header + every row line up like a table */
   .tlist{display:flex;flex-direction:column;gap:6px;
-    --c:48px minmax(96px,140px) minmax(0,1fr) 132px 98px 84px 84px 64px;}
-  .thead{display:grid;grid-template-columns:var(--c);gap:12px;padding:2px 14px 4px;
-    font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);}
+    --c:46px minmax(90px,130px) minmax(0,1fr) 116px 118px 96px 80px 78px 58px;}
+  .thead{display:grid;grid-template-columns:var(--c);gap:12px;padding:8px 14px;
+    font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
+    position:sticky;top:var(--sticky-top,150px);z-index:15;background:var(--bg);
+    border-bottom:1px solid var(--line);}
   .thead .th{cursor:pointer;user-select:none;white-space:nowrap;transition:color .12s;}
   .thead .th:hover{color:var(--ink);}
   .thead .th.on{color:var(--green);}
@@ -98,11 +100,21 @@
   .fl-block{background:#ede9fe;color:#6d28d9;} .fl-time{background:#e0f2fe;color:#0369a1;}
   .ns{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:#eef2ff;color:#3730a3;}
   .ns.mine{background:#fde68a;color:#92400e;}
+  .c-title .ns{display:none;}  /* desktop shows next_step in its own column; this pill is the mobile fallback */
   .when{font-size:12px;font-weight:600;} .when.over{color:var(--red);} .when.soon{color:var(--amber);}
   .est{font-size:11px;color:var(--muted);white-space:nowrap;}
   .stsel,.prsel{font-size:11px;font-weight:700;border-radius:6px;padding:3px 7px;border:1px solid transparent;
     color:#fff;-webkit-appearance:none;appearance:none;cursor:pointer;text-align:center;}
   .prsel{padding:3px 5px;min-width:34px;}
+  /* inline table editors: waiting-on select, click-to-edit dates */
+  .wsel{font-size:11px;font-weight:600;border:1px solid var(--line);border-radius:6px;padding:3px 6px;width:100%;
+    background:#fafbfc;color:var(--ink);-webkit-appearance:none;appearance:none;cursor:pointer;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .wsel:hover{border-color:#cfd3da;} .wsel.mine{background:#fde68a;color:#92400e;border-color:#fcd34d;font-weight:700;}
+  .wsel.empty{color:var(--muted);font-weight:500;}
+  .dedit{cursor:pointer;border-bottom:1px dashed transparent;}
+  .dedit:hover{border-bottom-color:#9aa0aa;}
+  .dinp{font-size:11px;border:1px solid var(--green);border-radius:6px;padding:2px 4px;width:100%;background:#fff;color:var(--ink);}
 
   /* ---------- board view ---------- */
   .board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:start;}
@@ -178,7 +190,8 @@
   @media(max-width:820px){
     .tlist{--c:44px minmax(0,1fr) 88px;}
     .thead{display:none;}
-    .c-cli,.c-status,.c-start,.c-touched,.c-est{display:none;}
+    .c-cli,.c-status,.c-wait,.c-start,.c-touched,.c-est{display:none;}
+    .c-title .ns{display:inline-flex;}  /* no waiting-on column on mobile → show the pill */
     .board{grid-template-columns:1fr;}
     .row1{gap:7px;}
   }
@@ -513,6 +526,8 @@ function visibleTasks(){
     est:(a,b)=> ((a.t.estimated_minutes||0)-(b.t.estimated_minutes||0)) || prio(a.t)-prio(b.t),
     // most-recently-touched first; flip (▲) surfaces stalest at top. Uses created_date as fallback.
     touched:(a,b)=> (touchedInfo(b.t).d||0)-(touchedInfo(a.t).d||0),
+    // group by who we're waiting on; blanks sink to the bottom, priority as tiebreak
+    wait:(a,b)=> ((a.t.next_step||'').trim()||'~~').toLowerCase().localeCompare(((b.t.next_step||'').trim()||'~~').toLowerCase()) || prio(a.t)-prio(b.t),
     created:(a,b)=> (parseDT(b.t.created_date)||0)-(parseDT(a.t.created_date)||0),
     client:(a,b)=> (a.t.client||'').localeCompare(b.t.client||'') || b.score-a.score,
     title:(a,b)=> (a.t.title||'').localeCompare(b.t.title||''),
@@ -539,6 +554,12 @@ function flagPills(flags){
 }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
+// The sticky column-header band sits below the (sticky) page header + toolbar, whose combined height
+// varies as chip rows wrap — measure it and feed --sticky-top so the band always docks right under them.
+function updateStickyTop(){
+  const h=document.querySelector('header'), tb=document.querySelector('.toolbar'); if(!h||!tb) return;
+  document.documentElement.style.setProperty('--sticky-top',(h.offsetHeight+tb.offsetHeight)+'px');
+}
 function render(){
   const ref=new Date();
   document.getElementById('today').textContent = ref.toLocaleDateString([], {weekday:'long',month:'long',day:'numeric'});
@@ -557,7 +578,7 @@ function render(){
   main.innerHTML=html.join('');
   main.querySelectorAll('.thead .th').forEach(th=>th.addEventListener('click',()=>setSort(th.dataset.sort)));
   main.querySelectorAll('.trow').forEach(r=>{
-    r.addEventListener('click',e=>{ if(e.target.closest('.stsel')||e.target.closest('.prsel'))return; openDrawer(r.dataset.id); });
+    r.addEventListener('click',e=>{ if(e.target.closest('.stsel')||e.target.closest('.prsel')||e.target.closest('.wsel')||e.target.closest('.dedit')||e.target.closest('.dinp'))return; openDrawer(r.dataset.id); });
   });
   main.querySelectorAll('.stsel').forEach(sel=>{
     sel.addEventListener('change',e=>{ e.stopPropagation(); setStatus(sel.dataset.id, sel.value); });
@@ -567,9 +588,17 @@ function render(){
     sel.addEventListener('change',e=>{ e.stopPropagation(); setPriority(sel.dataset.id, parseInt(sel.value,10)); });
     sel.addEventListener('click',e=>e.stopPropagation());
   });
+  main.querySelectorAll('.wsel').forEach(sel=>{
+    sel.addEventListener('change',e=>{ e.stopPropagation(); setNextStep(sel.dataset.id, sel.value); });
+    sel.addEventListener('click',e=>e.stopPropagation());
+  });
+  main.querySelectorAll('.dedit').forEach(el=>{
+    el.addEventListener('click',e=>{ e.stopPropagation(); startDateEdit(el); });
+  });
+  updateStickyTop();
 }
 // [sort-key, label] — same order as the row columns so headers line up over them
-const HCOLS=[['priority','Prio'],['client','Client'],['title','Task'],['status','Status'],['smart','Smart&nbsp;date'],['start','Start'],['touched','Last&nbsp;log'],['est','Est']];
+const HCOLS=[['priority','Prio'],['client','Client'],['title','Task'],['status','Status'],['wait','Waiting&nbsp;on'],['smart','Smart&nbsp;date'],['start','Start'],['touched','Last&nbsp;log'],['est','Est']];
 function gridHeader(){
   return `<div class="thead">`+HCOLS.map(([k,l])=>{
     const on=ui.sort===k, arr=on?(ui.dir<0?' ▼':' ▲'):'';
@@ -589,6 +618,7 @@ function rowHTML(x,ref){
     STATUSES.map(s=>`<option value="${s}" ${s===t.status?'selected':''}>${STATUS_LABEL[s]}</option>`).join('')+`</select>`;
   const prsel=`<select class="prsel" data-id="${t.id}" title="Priority — 1 highest, 5 lowest" style="background:${t.status==='done'?'#00B67E':PRIO_COLOR[prio(t)]}">`+
     [1,2,3,4,5].map(n=>`<option value="${n}" ${prio(t)===n?'selected':''}>P${n}</option>`).join('')+`</select>`;
+  const wsel=nextStepSelectHTML(t);
   const start=parseDT(t.start_date);
   const rep=t.recurrence&&REPEAT_LABEL[t.recurrence]?`<span class="rep">🔁 ${REPEAT_LABEL[t.recurrence]}</span>`:'';
   const wt=t.work_type&&WORK_TYPE_LABEL[t.work_type]?`<span class="wt" style="background:${WORK_TYPE_COLOR[t.work_type]}">${WORK_TYPE_LABEL[t.work_type]}</span>`:'';
@@ -605,8 +635,9 @@ function rowHTML(x,ref){
       ${metas.trim()?`<div class="meta">${metas}</div>`:''}
     </div>
     <div class="c-status">${stsel}</div>
-    <div class="c-smart"><span class="when ${w.cls}">${w.txt}</span></div>
-    <div class="c-start">${start?`<span class="celld">${fmtDate(start)}</span>`:'<span class="cmuted">—</span>'}</div>
+    <div class="c-wait">${wsel}</div>
+    <div class="c-smart"><span class="when ${w.cls} dedit" data-id="${t.id}" data-fld="due" title="Click to edit smart date">${w.txt}</span></div>
+    <div class="c-start"><span class="${start?'celld':'cmuted'} dedit" data-id="${t.id}" data-fld="start" title="Click to set start date">${start?fmtDate(start):'—'}</span></div>
     <div class="c-touched">${ti.d
       ? (ti.kind==='created'
           ? `<span class="celld created" title="No log entry — created ${ti.d.toLocaleDateString()} · ${daysSince(ti.d,ref)}d ago">·${fmtDate(ti.d)}</span>`
@@ -731,6 +762,40 @@ function setPriority(id,p){
   const t=getTask(id); if(!t)return; pushUndo(`${t.title.slice(0,24)} → Priority ${p}`); t.priority=p; save(); render();
   if(ui.editingId===id) openDrawer(id);
   toast(`${t.title.slice(0,28)} → Priority ${p} (${PRIO_LABEL[p]})`);
+}
+// Inline "Waiting on" picker for the table. Options = known next-steps (base + any already in use) + the
+// task's own current value; pick "—" to clear. For a brand-new custom value, use the drawer's free-text field.
+function nextStepSelectHTML(t){
+  const cur=(t.next_step||'').trim();
+  const opts=nextStepOptions(); if(cur && !opts.includes(cur)) opts.unshift(cur);
+  const cls='wsel'+(isMine(cur)?' mine':(cur?'':' empty'));
+  return `<select class="${cls}" data-id="${t.id}" title="Who the ball is with — click to change">`+
+    `<option value="" ${cur?'':'selected'}>—</option>`+
+    opts.map(o=>`<option value="${esc(o)}" ${o===cur?'selected':''}>${esc(o)}</option>`).join('')+`</select>`;
+}
+function setNextStep(id,val){
+  const t=getTask(id); if(!t)return; val=(val||'').trim();
+  pushUndo(`${t.title.slice(0,24)} → waiting: ${val||'—'}`); t.next_step=val; save(); render();
+  if(ui.editingId===id) openDrawer(id);
+  toast(`${t.title.slice(0,28)} → ${val?('waiting on '+val):'no wait set'}`);
+}
+// Inline date edit (smart/start). fld 'due' writes due_date (and clears the soft smart_date, same as the drawer).
+function setDate(id,fld,val){
+  const t=getTask(id); if(!t)return; const iso=val?dateInputToISO(val):null;
+  pushUndo(`${t.title.slice(0,24)} → ${fld==='due'?'smart':'start'} date`);
+  if(fld==='due'){ t.due_date=iso; t.smart_date=null; } else { t.start_date=iso; }
+  save(); render(); if(ui.editingId===id) openDrawer(id);
+  toast(`${t.title.slice(0,24)} → ${fld==='due'?'Smart':'Start'} date ${iso?fmtDate(parseDT(iso)):'cleared'}`);
+}
+function startDateEdit(el){
+  const id=el.dataset.id, fld=el.dataset.fld, t=getTask(id); if(!t)return;
+  const cur=fld==='due'?dateInputVal(effDue(t)):dateInputVal(t.start_date);
+  const inp=document.createElement('input'); inp.type='date'; inp.className='dinp'; inp.value=cur;
+  el.replaceWith(inp); inp.focus(); if(inp.showPicker){ try{inp.showPicker();}catch(_){} }
+  let done=false; const commit=()=>{ if(done)return; done=true; if(inp.value===cur){ render(); return; } setDate(id,fld,inp.value); };
+  inp.addEventListener('change',commit);
+  inp.addEventListener('blur',commit);
+  inp.addEventListener('keydown',ev=>{ if(ev.key==='Escape'){ done=true; render(); } else if(ev.key==='Enter'){ commit(); } });
 }
 function newId(){
   const d=new Date(); const p=n=>String(n).padStart(2,'0');
@@ -1085,6 +1150,7 @@ document.getElementById('btnImport').onclick=()=>document.getElementById('fileIn
 document.getElementById('fileInput').onchange=e=>{ if(e.target.files[0]) importJSON(e.target.files[0]); e.target.value=''; };
 document.getElementById('drawerClose').onclick=closeDrawer;
 document.getElementById('scrim').onclick=closeDrawer;
+window.addEventListener('resize',updateStickyTop);
 document.getElementById('search').addEventListener('input',e=>{ ui.q=e.target.value; render(); });
 document.getElementById('sortBy').addEventListener('change',e=>{ ui.sort=e.target.value; ui.dir=1; render(); });
 document.getElementById('viewSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
