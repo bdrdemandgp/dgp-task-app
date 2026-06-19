@@ -67,7 +67,7 @@
   .group-h .n{background:var(--line);color:var(--muted);border-radius:10px;padding:1px 8px;font-size:10.5px;}
   /* shared column template → header + every row line up like a table */
   .tlist{display:flex;flex-direction:column;gap:6px;
-    --c:48px minmax(96px,140px) minmax(0,1fr) 132px 98px 84px 64px;}
+    --c:48px minmax(96px,140px) minmax(0,1fr) 132px 98px 84px 84px 64px;}
   .thead{display:grid;grid-template-columns:var(--c);gap:12px;padding:2px 14px 4px;
     font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);}
   .thead .th{cursor:pointer;user-select:none;white-space:nowrap;transition:color .12s;}
@@ -87,6 +87,8 @@
   .stage{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;}
   .cf{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:#dcfce7;color:#166534;}
   .celld{font-size:12px;color:var(--ink);font-weight:500;}
+  .c-touched .celld{color:var(--muted);font-weight:500;} .c-touched .old{color:var(--amber);}
+  .c-touched .created{font-style:italic;opacity:.55;}
   .cmuted{color:var(--muted);font-size:11px;}
   .pill{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:6px;display:inline-flex;align-items:center;gap:4px;}
   .ctag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:6px;color:#fff;white-space:nowrap;}
@@ -176,7 +178,7 @@
   @media(max-width:820px){
     .tlist{--c:44px minmax(0,1fr) 88px;}
     .thead{display:none;}
-    .c-cli,.c-status,.c-start,.c-est{display:none;}
+    .c-cli,.c-status,.c-start,.c-touched,.c-est{display:none;}
     .board{grid-template-columns:1fr;}
     .row1{gap:7px;}
   }
@@ -210,6 +212,7 @@
       <option value="client">Sort: Client</option>
       <option value="title">Sort: Title A–Z</option>
       <option value="est">Sort: Est. time</option>
+      <option value="touched">Sort: Last log</option>
       <option value="created">Sort: Newest</option>
     </select>
     <select class="ctl" id="workTypeFilter"><option value="all">All types</option><option value="strategic">Strategic</option><option value="research">Research</option><option value="creative">Creative</option></select>
@@ -298,7 +301,7 @@ let WEIGHTS = {
   "big_task_minutes_threshold": 120,
   "max_score_cap": 100
 };
-const BUILD_DATE = "2026-06-17-shell";
+const BUILD_DATE = "2026-06-19-shell";
 const LS_KEY = "dgp_tasks_v1";
 
 /* Clients are NOT hardcoded — derived from the data so the hosted shell carries
@@ -429,6 +432,17 @@ function daysSince(d,ref){ return d?Math.floor((ref-d)/8.64e7):null; }
 function effDue(t){ return parseDT(t.due_date)||parseDT(t.smart_date); }
 function fmtTime(d){ return d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}); }
 function fmtDate(d){ return d.toLocaleDateString([], {month:'short',day:'numeric'}); }
+// "Last touched" = the most recent stamp found anywhere in notes. Handles both the v5 [YYYY-MM-DD …]
+// format and the older [MM/DD via …] format (year inferred = most recent date not in the future). null if none.
+function lastLog(t){ const s=t.notes||''; let best=null;
+  for(const m of s.matchAll(/\[(\d{4})-(\d{2})-(\d{2})/g)){ const d=new Date(+m[1],+m[2]-1,+m[3],12); if(!best||d>best)best=d; }
+  const now=new Date();
+  for(const m of s.matchAll(/\[(\d{1,2})\/(\d{1,2})\b/g)){ let d=new Date(now.getFullYear(),+m[1]-1,+m[2],12);
+    if(d>now)d=new Date(now.getFullYear()-1,+m[1]-1,+m[2],12); if(!best||d>best)best=d; }
+  return best; }
+// What the "Last log" column shows: the log stamp if there is one, else fall back to created_date (marked).
+function touchedInfo(t){ const l=lastLog(t); if(l) return {d:l,kind:'log'};
+  const c=parseDT(t.created_date); return c?{d:c,kind:'created'}:{d:null,kind:null}; }
 function dateInputVal(s){ const d=parseDT(s); if(!d) return "";
   const o={}; new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d).forEach(p=>o[p.type]=p.value);
   return `${o.year}-${o.month}-${o.day}`; }
@@ -497,6 +511,8 @@ function visibleTasks(){
     status:(a,b)=> rank(a.t.status)-rank(b.t.status) || prio(a.t)-prio(b.t),
     start:(a,b)=> ((parseDT(a.t.start_date)||Infinity)-(parseDT(b.t.start_date)||Infinity)) || prio(a.t)-prio(b.t),
     est:(a,b)=> ((a.t.estimated_minutes||0)-(b.t.estimated_minutes||0)) || prio(a.t)-prio(b.t),
+    // most-recently-touched first; flip (▲) surfaces stalest at top. Uses created_date as fallback.
+    touched:(a,b)=> (touchedInfo(b.t).d||0)-(touchedInfo(a.t).d||0),
     created:(a,b)=> (parseDT(b.t.created_date)||0)-(parseDT(a.t.created_date)||0),
     client:(a,b)=> (a.t.client||'').localeCompare(b.t.client||'') || b.score-a.score,
     title:(a,b)=> (a.t.title||'').localeCompare(b.t.title||''),
@@ -553,7 +569,7 @@ function render(){
   });
 }
 // [sort-key, label] — same order as the row columns so headers line up over them
-const HCOLS=[['priority','Prio'],['client','Client'],['title','Task'],['status','Status'],['smart','Smart&nbsp;date'],['start','Start'],['est','Est']];
+const HCOLS=[['priority','Prio'],['client','Client'],['title','Task'],['status','Status'],['smart','Smart&nbsp;date'],['start','Start'],['touched','Last&nbsp;log'],['est','Est']];
 function gridHeader(){
   return `<div class="thead">`+HCOLS.map(([k,l])=>{
     const on=ui.sort===k, arr=on?(ui.dir<0?' ▼':' ▲'):'';
@@ -567,7 +583,7 @@ function setSort(k){
   render();
 }
 function rowHTML(x,ref){
-  const t=x.t, w=whenInfo(t,ref), cc=clientColor(t.client);
+  const t=x.t, w=whenInfo(t,ref), cc=clientColor(t.client), ti=touchedInfo(t);
   const tags=(t.tags||[]).slice(0,2).map(g=>`<span class="tag">${esc(g)}</span>`).join('');
   const stsel=`<select class="stsel" data-id="${t.id}" style="background:${STATUS_COLOR[t.status]}">`+
     STATUSES.map(s=>`<option value="${s}" ${s===t.status?'selected':''}>${STATUS_LABEL[s]}</option>`).join('')+`</select>`;
@@ -591,6 +607,11 @@ function rowHTML(x,ref){
     <div class="c-status">${stsel}</div>
     <div class="c-smart"><span class="when ${w.cls}">${w.txt}</span></div>
     <div class="c-start">${start?`<span class="celld">${fmtDate(start)}</span>`:'<span class="cmuted">—</span>'}</div>
+    <div class="c-touched">${ti.d
+      ? (ti.kind==='created'
+          ? `<span class="celld created" title="No log entry — created ${ti.d.toLocaleDateString()} · ${daysSince(ti.d,ref)}d ago">·${fmtDate(ti.d)}</span>`
+          : `<span class="celld${daysSince(ti.d,ref)>30?' old':''}" title="Last log ${ti.d.toLocaleDateString()} · ${daysSince(ti.d,ref)}d ago">${fmtDate(ti.d)}</span>`)
+      : '<span class="cmuted">—</span>'}</div>
     <div class="c-est">${t.estimated_minutes?`<span class="est">⏱ ${estTxt(t.estimated_minutes)}</span>`:'<span class="cmuted">—</span>'}</div>
   </div>`;
 }
@@ -892,6 +913,7 @@ function exportCSV(){
     ['Flags',     x=>(x.flags||[]).join(' ')],
     ['Smart date',x=>dateInputVal(effDue(x.t))],
     ['Start date',x=>dateInputVal(x.t.start_date)],
+    ['Last log',  x=>{const i=touchedInfo(x.t);return i.d?dateInputVal(i.d.toISOString())+(i.kind==='created'?' (created)':''):'';}],
     ['Est. minutes',x=>x.t.estimated_minutes||''],
     ['Repeat',    x=>REPEAT_LABEL[x.t.recurrence]||''],
     ['Tags',      x=>(x.t.tags||[]).join(', ')],
