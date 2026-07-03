@@ -314,7 +314,7 @@ let WEIGHTS = {
   "big_task_minutes_threshold": 120,
   "max_score_cap": 100
 };
-const BUILD_DATE = "2026-06-19-shell";
+const BUILD_DATE = "2026-07-03-shell";
 const LS_KEY = "dgp_tasks_v1";
 
 /* Clients are NOT hardcoded — derived from the data so the hosted shell carries
@@ -1151,6 +1151,12 @@ document.getElementById('fileInput').onchange=e=>{ if(e.target.files[0]) importJ
 document.getElementById('drawerClose').onclick=closeDrawer;
 document.getElementById('scrim').onclick=closeDrawer;
 window.addEventListener('resize',updateStickyTop);
+// header/toolbar live outside #main, so their height can change (font load, chip-row wrap, zoom)
+// without a render or resize — watch them directly so --sticky-top never goes stale and lets a
+// card show in the gap above the docked column-header band.
+if(window.ResizeObserver){ const ro=new ResizeObserver(updateStickyTop);
+  const h=document.querySelector('header'), tb=document.querySelector('.toolbar');
+  if(h)ro.observe(h); if(tb)ro.observe(tb); }
 document.getElementById('search').addEventListener('input',e=>{ ui.q=e.target.value; render(); });
 document.getElementById('sortBy').addEventListener('change',e=>{ ui.sort=e.target.value; ui.dir=1; render(); });
 document.getElementById('viewSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
