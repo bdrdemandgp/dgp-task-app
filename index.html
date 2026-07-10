@@ -317,7 +317,7 @@ let WEIGHTS = {
   "big_task_minutes_threshold": 120,
   "max_score_cap": 100
 };
-const BUILD_DATE = "2026-07-03-shell";
+const BUILD_DATE = "2026-07-10-shell";
 const LS_KEY = "dgp_tasks_v1";
 
 /* Clients are NOT hardcoded — derived from the data so the hosted shell carries
@@ -370,7 +370,7 @@ const CLIENT_PALETTE=["#f4811e","#1A5FAB","#7c3aed","#00B67E","#0891b2","#db2777
 function clientColor(name){ if(!name) return '#6b7280'; let h=0; for(let i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))>>>0; return CLIENT_PALETTE[h%CLIENT_PALETTE.length]; }
 // weight key derived from name; matches weights.json convention (hyphens dropped)
 function clientWeightKey(name){ return 'client_'+name.replace(/[^a-z0-9 ]/gi,'').trim().toLowerCase().replace(/\s+/g,'_'); }
-const STATUSES = ["open","in_progress","blocked","staged","done","deferred"];
+const STATUSES = ["open","in_progress","review","blocked","staged","done","deferred"];
 // recurrence: closing a task with one of these auto-creates the next occurrence
 const REPEAT_LABEL = {weekly:"Weekly",biweekly:"Every 2 weeks",monthly:"Monthly",quarterly:"Quarterly"};
 // work_type: strategic (decisions/planning/biz-dev) | research (look into a client ask + put together a response) | creative (execution + production — content/design/video/pages; was "tactical")
@@ -383,11 +383,11 @@ const DISPOSITIONS_OPT  = ["Admin / VA","Drop / Out of Scope"];
 const DISPOSITIONS = [...DISPOSITIONS_CORE, ...DISPOSITIONS_OPT];
 const DISPOSITION_COLOR = {"Potential Automation":"#0891b2","Execution Partner":"#7c3aed","Creative Resource":"#be185d",
   "Existing Vendor":"#b45309","Client Internal":"#0369a1","Keep (Brian)":"#15803d","Admin / VA":"#6b7280","Drop / Out of Scope":"#9ca3af"};
-const STATUS_LABEL = {open:"Open",in_progress:"In progress",blocked:"Blocked",staged:"Staged",done:"Done",deferred:"Deferred"};
-const STATUS_COLOR = {open:"#64748b",in_progress:"#1A5FAB",blocked:"#d97706",staged:"#8b5cf6",done:"#00B67E",deferred:"#9ca3af"};
-const BOARD_COLS = ["open","in_progress","blocked","staged","done"];
-// "active" = anything still in flight (incl. blocked, so waiting-on-vendor tasks stay visible)
-const ACTIVE = ["open","in_progress","blocked","staged"];
+const STATUS_LABEL = {open:"Open",in_progress:"In progress",review:"Review",blocked:"Blocked",staged:"Staged",done:"Done",deferred:"Deferred"};
+const STATUS_COLOR = {open:"#64748b",in_progress:"#1A5FAB",review:"#db2777",blocked:"#d97706",staged:"#8b5cf6",done:"#00B67E",deferred:"#9ca3af"};
+const BOARD_COLS = ["open","in_progress","review","blocked","staged","done"];
+// "active" = anything still in flight (incl. blocked + review, so waiting-on-signoff tasks stay visible)
+const ACTIVE = ["open","in_progress","review","blocked","staged"];
 // Manual priority you set: 1 = highest … 5 = lowest (the default). Replaces the old computed score.
 const PRIO_COLOR = {1:"#dc2626",2:"#ea580c",3:"#d9a406",4:"#64748b",5:"#9ca3af"};
 const PRIO_LABEL = {1:"Highest",2:"High",3:"Medium",4:"Low",5:"Lowest"};
@@ -407,7 +407,7 @@ function isMine(ns){ const n=(ns||'').trim().toLowerCase(); return n==='brian'||
 let doc = load();
 let ui = { client:"all", status:"active", tag:"", worktype:"all", disposition:"all", wait:"all", q:"", sort:"smart", dir:1, view:"list", editingId:null };
 // rank used when sorting by the Status column
-const STATUS_SORT_ORDER=['open','in_progress','blocked','staged','done','deferred'];
+const STATUS_SORT_ORDER=['open','in_progress','review','blocked','staged','done','deferred'];
 
 /* ---------- persistence ---------- */
 function load(){
@@ -686,7 +686,7 @@ function renderChips(){
     clientList().map(c=>chip(c,c,counts[c]||0,ui.client===c,clientColor(c))).join('');
   cc.querySelectorAll('[data-chip]').forEach(el=>el.onclick=()=>{ ui.client=el.dataset.chip; render(); });
   const sc=document.getElementById('statusChips');
-  const opts=[['active','Active'],['open','Open'],['in_progress','In progress'],['blocked','Blocked'],['staged','Staged'],['done','Done'],['deferred','Deferred'],['all','All']];
+  const opts=[['active','Active'],['open','Open'],['in_progress','In progress'],['review','Review'],['blocked','Blocked'],['staged','Staged'],['done','Done'],['deferred','Deferred'],['all','All']];
   sc.innerHTML=opts.map(([v,l])=>{
     const n = v==='active'?doc.tasks.filter(t=>ACTIVE.includes(t.status)).length
             : v==='all'?doc.tasks.length : doc.tasks.filter(t=>t.status===v).length;
