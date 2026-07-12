@@ -317,7 +317,7 @@ let WEIGHTS = {
   "big_task_minutes_threshold": 120,
   "max_score_cap": 100
 };
-const BUILD_DATE = "2026-07-10-shell";
+const BUILD_DATE = "2026-07-12-shell";
 const LS_KEY = "dgp_tasks_v1";
 
 /* Clients are NOT hardcoded — derived from the data so the hosted shell carries
@@ -825,6 +825,7 @@ function openDrawer(id){
       <div class="fld"><label>Client</label>${clientSelectHTML(t.client||'')}</div>
       <div class="fld"><label>Status</label><select id="f_status">${STATUSES.map(s=>`<option value="${s}" ${s===t.status?'selected':''}>${STATUS_LABEL[s]}</option>`).join('')}</select></div>
     </div>
+    ${(doc.hubs&&doc.hubs[t.client])?`<div style="margin:-4px 0 12px"><a href="${esc(doc.hubs[t.client])}" target="_blank" rel="noopener" style="font-size:13px;color:#1A5FAB;text-decoration:none;font-weight:600">📖 Project brief — open the ${esc(t.client)} hub for full context</a></div>`:''}
     <div class="fld"><label>Stage &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">(production sub-stage — e.g. In Design, Final Proof, Need Vendor)</span></label>
       <input id="f_stage" value="${esc(t.stage||'')}" placeholder="e.g. In Design"></div>
     <div class="fld"><label>Waiting on / Next step</label>
