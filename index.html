@@ -89,6 +89,13 @@
   .rep{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:#eef2ff;color:#4338ca;}
   .wt{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#fff;}
   .disp{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#fff;}
+  .att{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#fff;}
+  .attgrp{display:flex;gap:6px;flex-wrap:wrap;}
+  .attopt{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
+    padding:6px 10px;border:1px solid #d4d4d8;border-radius:6px;cursor:pointer;background:#fff;user-select:none;}
+  .attopt:hover{border-color:#a1a1aa;}
+  .attopt.on{border-color:#0f172a;background:#f1f5f9;}
+  .attopt input{margin:0;}
   .stage{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:#fff7ed;color:#9a3412;border:1px solid #fdba74;}
   .cf{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:#dcfce7;color:#166534;}
   .celld{font-size:12px;color:var(--ink);font-weight:500;}
@@ -317,7 +324,7 @@ let WEIGHTS = {
   "big_task_minutes_threshold": 120,
   "max_score_cap": 100
 };
-const BUILD_DATE = "2026-07-12-shell";
+const BUILD_DATE = "2026-09-10-shell";
 const LS_KEY = "dgp_tasks_v1";
 
 /* Clients are NOT hardcoded — derived from the data so the hosted shell carries
@@ -377,6 +384,21 @@ const REPEAT_LABEL = {weekly:"Weekly",biweekly:"Every 2 weeks",monthly:"Monthly"
 const WORK_TYPES = ["strategic","research","creative"];
 const WORK_TYPE_LABEL = {strategic:"Strategic",research:"Research",creative:"Creative"};
 const WORK_TYPE_COLOR = {strategic:"#7c3aed",research:"#0d9488",creative:"#ea580c"};
+// attention: how much of BRIAN'S OWN clock this consumes. estimated_minutes sizes the JOB;
+// this sizes the demand on him, which is what the ~5h/day cap is actually about.
+//   fixed = locked to a time and exclusive (meetings, calls) — nothing overlaps it
+//   focus = needs his full attention but is movable — schedule a real block
+//   none  = barely touches his clock (Claude builds and he reviews, handoffs, waiting-on)
+//   null  = not classified yet; day-load counts it separately, never silently as zero
+const ATTENTIONS = ["fixed","focus","none"];
+const ATTENTION_LABEL = {fixed:"Fixed time",focus:"Full attention",none:"Hands-off"};
+const ATTENTION_ICON  = {fixed:"🔒",focus:"🎯",none:"🤝"};
+const ATTENTION_COLOR = {fixed:"#be123c",focus:"#b45309",none:"#475569"};
+const ATTENTION_HELP  = {fixed:"Locked to a clock time. Nothing else runs alongside it.",
+  focus:"Movable, but needs a solid block once it starts.",
+  none:"Claude builds it, or it sits in someone else's court. Does not eat the day."};
+// Minutes of Brian's own clock a task costs. Hands-off work costs him nothing.
+function brianMinutes(t){ return t.attention==='none' ? 0 : (t.estimated_minutes||0); }
 // disposition: for TACTICAL tasks only — how the execution work should be resourced/routed
 const DISPOSITIONS_CORE = ["Potential Automation","Execution Partner","Creative Resource","Existing Vendor","Client Internal","Keep (Brian)"];
 const DISPOSITIONS_OPT  = ["Admin / VA","Drop / Out of Scope"];
@@ -628,8 +650,9 @@ function rowHTML(x,ref){
   const disp=t.work_type==='creative'&&t.disposition?`<span class="disp" style="background:${DISPOSITION_COLOR[t.disposition]||'#6b7280'}">${esc(t.disposition)}</span>`:'';
   const stage=t.stage?`<span class="stage">▣ ${esc(t.stage)}</span>`:'';
   const cf=t.client_facing?`<span class="cf">client-facing</span>`:'';
+  const att=t.attention&&ATTENTION_LABEL[t.attention]?`<span class="att" title="${esc(ATTENTION_HELP[t.attention])}" style="background:${ATTENTION_COLOR[t.attention]}">${ATTENTION_ICON[t.attention]} ${ATTENTION_LABEL[t.attention]}</span>`:'';
   const ns=t.next_step?`<span class="ns${isMine(t.next_step)?' mine':''}">⏳ ${esc(t.next_step)}</span>`:'';
-  const metas=`${wt}${disp}${stage}${cf}${ns}${flagPills(x.flags)}${rep}${tags}`;
+  const metas=`${wt}${att}${disp}${stage}${cf}${ns}${flagPills(x.flags)}${rep}${tags}`;
   return `<div class="trow" data-id="${t.id}">
     <div class="c-prio">${prsel}</div>
     <div class="c-cli"><span class="ctag" style="background:${cc}">${esc(t.client||'—')}</span></div>
@@ -808,7 +831,7 @@ function newId(){
 function blankTask(){
   return {id:newId(),title:'',client:ui.client!=='all'?ui.client:(clientList()[0]||''),due_date:null,
     smart_date:null,start_date:null,estimated_minutes:30,status:'open',priority:5,recurrence:null,
-    work_type:'creative',disposition:null,stage:'',client_facing:false,next_step:'',
+    work_type:'creative',disposition:null,stage:'',client_facing:false,next_step:'',attention:null,
     created_date:nowISO(),completed_date:null,source:'manual',depends_on:[],tags:[],notes:''};
 }
 
@@ -829,7 +852,7 @@ function openDrawer(id){
     <div class="fld"><label>Stage &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">(production sub-stage — e.g. In Design, Final Proof, Need Vendor)</span></label>
       <input id="f_stage" value="${esc(t.stage||'')}" placeholder="e.g. In Design"></div>
     <div class="fld"><label>Waiting on / Next step</label>
-      <input id="f_nextstep" list="nextStepOpts" value="${esc(t.next_step||'')}" placeholder="Brian (on me), Client, Vendor, Henry…">
+      <input id="f_nextstep" list="nextStepOpts" value="${esc(t.next_step||'')}" placeholder="Brian (on me), Client, Vendor, a name…">
       <datalist id="nextStepOpts">${nextStepOptions().map(o=>`<option value="${esc(o)}">`).join('')}</datalist></div>
     <div class="fld"><label>Priority &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">(1 = highest · 5 = lowest)</span></label>
       <select id="f_prio">${[1,2,3,4,5].map(n=>`<option value="${n}" ${prio(t)===n?'selected':''}>${n} — ${PRIO_LABEL[n]}${n===5?' (default)':''}</option>`).join('')}</select></div>
@@ -848,6 +871,8 @@ function openDrawer(id){
       <div class="fld" id="dispWrap" style="${(t.work_type||'creative')==='creative'?'':'display:none'}"><label>Disposition</label>
         <select id="f_disposition"><option value="">— select —</option>${dispositionOptions(t.disposition)}</select></div>
     </div>
+    <div class="fld"><label>Attention &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">how much of YOUR clock this costs, not how big the job is</span></label>
+      <div class="attgrp">${ATTENTIONS.map(a=>`<label class="attopt${(t.attention===a)?' on':''}" title="${esc(ATTENTION_HELP[a])}"><input type="radio" name="f_attention" value="${a}" ${t.attention===a?'checked':''}> ${ATTENTION_ICON[a]} ${ATTENTION_LABEL[a]}</label>`).join('')}<label class="attopt${t.attention?'':' on'}" title="Not classified yet"><input type="radio" name="f_attention" value="" ${t.attention?'':'checked'}> — unset</label></div></div>
     <div class="fld"><label class="chk"><input type="checkbox" id="f_clientfacing" ${t.client_facing?'checked':''}> Client-facing — a deliverable the client sees</label></div>
     <div class="fld"><label>Tags (comma-separated)</label><input id="f_tags" value="${esc((t.tags||[]).join(', '))}" placeholder="video-wall, campaign, permit-miner"></div>
     <div class="fld"><label>Notes / Log &nbsp;<span style="font-weight:400;text-transform:none;letter-spacing:0">(newest on top)</span></label>
@@ -911,6 +936,7 @@ function collectDraft(){
   d.disposition = d.work_type==='creative' ? (g('f_disposition').value||null) : null;
   d.stage=(g('f_stage').value||'').trim();
   d.client_facing=g('f_clientfacing').checked;
+  { const r=document.querySelector('input[name="f_attention"]:checked'); d.attention = r && r.value ? r.value : null; }
   d.tags=g('f_tags').value.split(',').map(s=>s.trim()).filter(Boolean);
   d.next_step=(g('f_nextstep').value||'').trim();
   d.notes=g('f_notes').value;
@@ -976,6 +1002,8 @@ function exportCSV(){
     ['Disposition', x=>x.t.disposition||''],
     ['Stage',     x=>x.t.stage||''],
     ['Client-facing', x=>x.t.client_facing?'yes':'no'],
+    ['Attention', x=>ATTENTION_LABEL[x.t.attention]||''],
+    ['Brian minutes', x=>brianMinutes(x.t)],
     ['Priority',  x=>prio(x.t)],
     ['Priority label', x=>PRIO_LABEL[prio(x.t)]||''],
     ['Score',     x=>Math.round(x.score)],
